@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using PaymentService.Application.Interfaces;
 using PaymentService.Domain.Entities;
 using PaymentService.Infrastructure.Persistence;
@@ -18,6 +19,14 @@ public class PaymentRepository : IPaymentRepository
         CancellationToken cancellationToken = default)
     {
         await _dbContext.Payments.AddAsync(payment, cancellationToken);
+    }
+
+    public async Task<Payment?> GetByOrderIdAsync(
+        Guid orderId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Payments
+            .FirstOrDefaultAsync(p => p.OrderId == orderId, cancellationToken);
     }
 
     public async Task SaveChangesAsync(

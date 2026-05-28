@@ -8,6 +8,10 @@ public interface INotificationRepository
         Notification notification,
         CancellationToken cancellationToken = default);
 
+    Task<List<Notification>> GetByUserIdAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
     Task SaveChangesAsync(
         CancellationToken cancellationToken = default);
 }

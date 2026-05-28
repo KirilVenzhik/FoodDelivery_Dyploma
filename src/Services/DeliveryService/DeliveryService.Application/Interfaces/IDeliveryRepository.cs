@@ -16,6 +16,10 @@ public interface IDeliveryRepository
         Guid orderId,
         CancellationToken cancellationToken = default);
 
+    Task<List<Delivery>> GetByCourierIdAsync(
+        Guid courierId,
+        CancellationToken cancellationToken = default);
+
     Task SaveChangesAsync(
         CancellationToken cancellationToken = default);
 }

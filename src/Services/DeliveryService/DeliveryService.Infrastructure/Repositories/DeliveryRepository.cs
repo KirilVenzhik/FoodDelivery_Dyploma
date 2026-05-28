@@ -37,6 +37,16 @@ public class DeliveryRepository : IDeliveryRepository
             .FirstOrDefaultAsync(d => d.OrderId == orderId, cancellationToken);
     }
 
+    public async Task<List<Delivery>> GetByCourierIdAsync(
+        Guid courierId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Deliveries
+            .Where(d => d.CourierId == courierId)
+            .OrderByDescending(d => d.UpdatedAt)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task SaveChangesAsync(
         CancellationToken cancellationToken = default)
     {

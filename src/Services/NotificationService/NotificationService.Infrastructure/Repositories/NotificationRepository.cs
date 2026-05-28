@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using NotificationService.Application.Interfaces;
 using NotificationService.Domain.Entities;
 using NotificationService.Infrastructure.Persistence;
@@ -18,6 +19,16 @@ public class NotificationRepository : INotificationRepository
         CancellationToken cancellationToken = default)
     {
         await _dbContext.Notifications.AddAsync(notification, cancellationToken);
+    }
+
+    public async Task<List<Notification>> GetByUserIdAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Notifications
+            .Where(n => n.UserId == userId)
+            .OrderByDescending(n => n.CreatedAt)
+            .ToListAsync(cancellationToken);
     }
 
     public async Task SaveChangesAsync(

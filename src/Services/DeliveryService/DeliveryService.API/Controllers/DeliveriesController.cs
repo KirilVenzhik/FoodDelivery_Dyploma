@@ -1,7 +1,7 @@
 using Auth.Abstractions;
-using Contracts.Events;
-using DeliveryService.Application.Interfaces;
-using EventBus.Abstractions;
+using DeliveryService.Application.Commands;
+using DeliveryService.Application.Common;
+using DeliveryService.Application.Queries;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,109 +12,101 @@ namespace DeliveryService.API.Controllers;
 [Authorize]
 public class DeliveriesController : ControllerBase
 {
-    private readonly IDeliveryRepository _deliveryRepository;
-    private readonly IEventBus _eventBus;
+    private readonly AssignDeliveryCommandHandler _assignHandler;
+    private readonly PickupDeliveryCommandHandler _pickupHandler;
+    private readonly CompleteDeliveryCommandHandler _completeHandler;
+    private readonly GetDeliveryByIdQueryHandler _getByIdHandler;
+    private readonly GetDeliveriesByCourierQueryHandler _getByCourierHandler;
     private readonly ICurrentUser _currentUser;
 
     public DeliveriesController(
-        IDeliveryRepository deliveryRepository,
-        IEventBus eventBus,
+        AssignDeliveryCommandHandler assignHandler,
+        PickupDeliveryCommandHandler pickupHandler,
+        CompleteDeliveryCommandHandler completeHandler,
+        GetDeliveryByIdQueryHandler getByIdHandler,
+        GetDeliveriesByCourierQueryHandler getByCourierHandler,
         ICurrentUser currentUser)
     {
-        _deliveryRepository = deliveryRepository;
-        _eventBus = eventBus;
+        _assignHandler = assignHandler;
+        _pickupHandler = pickupHandler;
+        _completeHandler = completeHandler;
+        _getByIdHandler = getByIdHandler;
+        _getByCourierHandler = getByCourierHandler;
         _currentUser = currentUser;
+    }
+
+    [HttpGet]
+    [Authorize(Roles = "Courier")]
+    public async Task<IActionResult> GetMyDeliveries(CancellationToken cancellationToken)
+    {
+        var deliveries = await _getByCourierHandler.HandleAsync(
+            new GetDeliveriesByCourierQuery(_currentUser.UserId), cancellationToken);
+
+        return Ok(deliveries);
     }
 
     [HttpGet("{id:guid}")]
     [Authorize(Roles = "Courier,Administrator")]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
-        var delivery = await _deliveryRepository.GetByIdAsync(id, cancellationToken);
+        var result = await _getByIdHandler.HandleAsync(
+            new GetDeliveryByIdQuery(id), cancellationToken);
 
-        if (delivery is null)
-            return NotFound();
-
-        return Ok(new
+        return result.Status switch
         {
-            delivery.Id,
-            delivery.OrderId,
-            delivery.CourierId,
-            Status = delivery.Status.ToString(),
-            delivery.CreatedAt,
-            delivery.UpdatedAt
-        });
+            CommandResultStatus.Success => Ok(result.Value),
+            CommandResultStatus.NotFound => NotFound(),
+            _ => StatusCode(500)
+        };
     }
 
     [HttpPatch("{id:guid}/assign")]
     [Authorize(Roles = "Courier")]
     public async Task<IActionResult> Assign(Guid id, CancellationToken cancellationToken)
     {
-        var delivery = await _deliveryRepository.GetByIdAsync(id, cancellationToken);
+        var result = await _assignHandler.HandleAsync(
+            new AssignDeliveryCommand(id, _currentUser.UserId), cancellationToken);
 
-        if (delivery is null)
-            return NotFound();
-
-        if (delivery.Status != Domain.Enums.DeliveryStatus.Pending)
-            return UnprocessableEntity("Delivery is not in Pending status.");
-
-        delivery.Assign(_currentUser.UserId);
-
-        await _deliveryRepository.SaveChangesAsync(cancellationToken);
-
-        return NoContent();
+        return result.Status switch
+        {
+            CommandResultStatus.Success => NoContent(),
+            CommandResultStatus.NotFound => NotFound(),
+            CommandResultStatus.UnprocessableEntity => UnprocessableEntity(result.Error),
+            _ => StatusCode(500)
+        };
     }
 
     [HttpPatch("{id:guid}/pickup")]
     [Authorize(Roles = "Courier")]
     public async Task<IActionResult> Pickup(Guid id, CancellationToken cancellationToken)
     {
-        var delivery = await _deliveryRepository.GetByIdAsync(id, cancellationToken);
+        var result = await _pickupHandler.HandleAsync(
+            new PickupDeliveryCommand(id, _currentUser.UserId), cancellationToken);
 
-        if (delivery is null)
-            return NotFound();
-
-        if (delivery.CourierId != _currentUser.UserId)
-            return Forbid();
-
-        if (delivery.Status != Domain.Enums.DeliveryStatus.Assigned)
-            return UnprocessableEntity("Delivery is not in Assigned status.");
-
-        delivery.Pickup();
-
-        await _deliveryRepository.SaveChangesAsync(cancellationToken);
-
-        return NoContent();
+        return result.Status switch
+        {
+            CommandResultStatus.Success => NoContent(),
+            CommandResultStatus.NotFound => NotFound(),
+            CommandResultStatus.Forbidden => Forbid(),
+            CommandResultStatus.UnprocessableEntity => UnprocessableEntity(result.Error),
+            _ => StatusCode(500)
+        };
     }
 
     [HttpPatch("{id:guid}/deliver")]
     [Authorize(Roles = "Courier")]
     public async Task<IActionResult> Deliver(Guid id, CancellationToken cancellationToken)
     {
-        var delivery = await _deliveryRepository.GetByIdAsync(id, cancellationToken);
+        var result = await _completeHandler.HandleAsync(
+            new CompleteDeliveryCommand(id, _currentUser.UserId), cancellationToken);
 
-        if (delivery is null)
-            return NotFound();
-
-        if (delivery.CourierId != _currentUser.UserId)
-            return Forbid();
-
-        if (delivery.Status != Domain.Enums.DeliveryStatus.InProgress)
-            return UnprocessableEntity("Delivery is not in InProgress status.");
-
-        delivery.Complete();
-
-        await _deliveryRepository.SaveChangesAsync(cancellationToken);
-
-        await _eventBus.PublishAsync(
-            new DeliveryCompletedEvent
-            {
-                OrderId = delivery.OrderId,
-                DeliveryId = delivery.Id
-            },
-            "delivery.completed",
-            cancellationToken);
-
-        return NoContent();
+        return result.Status switch
+        {
+            CommandResultStatus.Success => NoContent(),
+            CommandResultStatus.NotFound => NotFound(),
+            CommandResultStatus.Forbidden => Forbid(),
+            CommandResultStatus.UnprocessableEntity => UnprocessableEntity(result.Error),
+            _ => StatusCode(500)
+        };
     }
 }

@@ -1,4 +1,6 @@
+using DeliveryService.Application.Commands;
 using DeliveryService.Application.Interfaces;
+using DeliveryService.Application.Queries;
 using DeliveryService.Infrastructure.BackgroundJobs;
 using DeliveryService.Infrastructure.Persistence;
 using DeliveryService.Infrastructure.Repositories;
@@ -19,6 +21,12 @@ public static class DependencyInjection
             options.UseNpgsql(configuration.GetConnectionString("Database")));
 
         services.AddScoped<IDeliveryRepository, DeliveryRepository>();
+
+        services.AddScoped<AssignDeliveryCommandHandler>();
+        services.AddScoped<PickupDeliveryCommandHandler>();
+        services.AddScoped<CompleteDeliveryCommandHandler>();
+        services.AddScoped<GetDeliveryByIdQueryHandler>();
+        services.AddScoped<GetDeliveriesByCourierQueryHandler>();
 
         services.AddEventBus(configuration);
 

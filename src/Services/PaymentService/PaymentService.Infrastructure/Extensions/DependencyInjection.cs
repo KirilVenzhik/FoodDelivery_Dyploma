@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PaymentService.Application.Interfaces;
+using PaymentService.Application.Queries;
 using PaymentService.Infrastructure.BackgroundJobs;
 using PaymentService.Infrastructure.Persistence;
 using PaymentService.Infrastructure.Repositories;
@@ -19,6 +20,7 @@ public static class DependencyInjection
             options.UseNpgsql(configuration.GetConnectionString("Database")));
 
         services.AddScoped<IPaymentRepository, PaymentRepository>();
+        services.AddScoped<GetPaymentByOrderIdQueryHandler>();
 
         services.AddEventBus(configuration);
 
