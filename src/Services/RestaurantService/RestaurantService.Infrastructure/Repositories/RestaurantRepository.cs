@@ -47,6 +47,14 @@ public class RestaurantRepository
                 cancellationToken);
     }
 
+    public async Task<List<Restaurant>> GetAllAsync(
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Restaurants
+            .Include(x => x.MenuItems)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task SaveChangesAsync(
         CancellationToken cancellationToken = default)
     {

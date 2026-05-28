@@ -353,13 +353,19 @@ All inherit `Contracts.Abstractions.IntegrationEvent`. All in namespace `Contrac
 - Both new Infrastructure csproj files needed `Microsoft.Extensions.Hosting.Abstractions` and `RabbitMQ.Client` (matching PaymentService.Infrastructure pattern)
 - Both new API csproj files needed `Microsoft.EntityFrameworkCore.Design` (matching PaymentService.API pattern, required for `dotnet ef migrations`)
 
-### Exact next step to continue
-**RestaurantService GET endpoints** (needed for OrderService validation):
-- `GET /api/restaurants` — list all restaurants
-- `GET /api/restaurants/{id}` — return restaurant with MenuItems
-  Response must map to `OrderService.Application.DTOs.RestaurantDto`: `{Id, Name, Status(string), MenuItems:[{Id,Name,Price,IsAvailable}]}`
-  Read existing RestaurantService code first before touching anything.
+**RestaurantService** — GET endpoints added:
+- Added `GetAllAsync` to `IRestaurantRepository` + implementation (eager-loads MenuItems)
+- Added `GET /api/restaurants` [Authorize] — returns list with `{Id, Name, Status(string), MenuItems:[{Id,Name,Price,IsAvailable}]}`
+- Added `GET /api/restaurants/{restaurantId}` [Authorize] — returns single restaurant same shape
+- Both endpoints return Status as `.ToString()` so OrderService can compare with "Open"
 
-**Then ApiGateway** (YARP — add `Yarp.ReverseProxy` to Directory.Packages.props + csproj, configure routes for all services)
+### Exact next step to continue
+**ApiGateway** (YARP):
+1. Add `Yarp.ReverseProxy` to `Directory.Packages.props`
+2. Add `Yarp.ReverseProxy` PackageReference to `ApiGateway.csproj`
+3. Read existing `ApiGateway` Program.cs and appsettings first
+4. Configure YARP routes for all 5 services (Auth, Restaurant, Order, Payment, Delivery)
+   - NotificationService has no REST endpoints — skip
+   - Typical YARP config: routes + clusters in appsettings.json
 
 **Then docker-compose.yml** (add all service containers + postgres DBs + RabbitMQ)

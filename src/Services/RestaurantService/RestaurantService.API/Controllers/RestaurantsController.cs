@@ -114,6 +114,55 @@ public class RestaurantsController : ControllerBase
         return Ok();
     }
 
+    [Authorize]
+    [HttpGet]
+    public async Task<IActionResult> GetAll(CancellationToken cancellationToken)
+    {
+        var restaurants = await _repository.GetAllAsync(cancellationToken);
+
+        var response = restaurants.Select(r => new
+        {
+            r.Id,
+            r.Name,
+            Status = r.Status.ToString(),
+            MenuItems = r.MenuItems.Select(m => new
+            {
+                m.Id,
+                m.Name,
+                m.Price,
+                m.IsAvailable
+            }).ToList()
+        }).ToList();
+
+        return Ok(response);
+    }
+
+    [Authorize]
+    [HttpGet("{restaurantId:guid}")]
+    public async Task<IActionResult> GetById(
+        Guid restaurantId,
+        CancellationToken cancellationToken)
+    {
+        var restaurant = await _repository.GetByIdAsync(restaurantId, cancellationToken);
+
+        if (restaurant is null)
+            return NotFound();
+
+        return Ok(new
+        {
+            restaurant.Id,
+            restaurant.Name,
+            Status = restaurant.Status.ToString(),
+            MenuItems = restaurant.MenuItems.Select(m => new
+            {
+                m.Id,
+                m.Name,
+                m.Price,
+                m.IsAvailable
+            }).ToList()
+        });
+    }
+
     [Authorize(Roles = "RestaurantOwner")]
     [HttpPost("{restaurantId:guid}/close")]
     public async Task<IActionResult> Close(

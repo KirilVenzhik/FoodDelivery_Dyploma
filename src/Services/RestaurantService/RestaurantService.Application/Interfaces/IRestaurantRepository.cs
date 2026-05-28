@@ -16,6 +16,9 @@ public interface IRestaurantRepository
         Guid ownerUserId,
         CancellationToken cancellationToken = default);
 
+    Task<List<Restaurant>> GetAllAsync(
+        CancellationToken cancellationToken = default);
+
     Task SaveChangesAsync(
         CancellationToken cancellationToken = default);
 }
