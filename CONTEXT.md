@@ -383,16 +383,102 @@ All inherit `Contracts.Abstractions.IntegrationEvent`. All in namespace `Contrac
 - RabbitMQ: all consumer connections established
 - OrderService Outbox worker polling every 2s (expected steady-state)
 
-### Branch status
-`feature/implement-services` pushed to GitHub. PR can be opened at:
-https://github.com/KirilVenzhik/food-delivery-dyploma/pull/new/feature/implement-services
+### Branch status (2026-05-28)
+`feature/implement-services` merged to `master`.
+
+---
+
+## Session Progress (2026-05-29)
+
+Branch: `master` (all changes committed directly)
+
+### Completed
+
+**RestaurantService — CQRS refactor + missing endpoints (Step 1):**
+- Application layer: 6 Command handlers (`CreateRestaurant`, `AddMenuItem`, `UpdateMenuItem`, `DeleteMenuItem`, `OpenRestaurant`, `CloseRestaurant`) + 3 Query handlers (`GetAll`, `GetById`, `GetMenuItems`) — each command + handler in one file under `Commands/` / `Queries/`
+- `CommandResult` (sealed, `Common/`) with `Success/NotFound/Forbidden/Conflict` statuses + optional `CreatedId`
+- Response DTOs: `RestaurantResponse`, `MenuItemResponse` with `FromDomain()` factory, `UpdateMenuItemRequest`
+- Domain: `MenuItem.Update(name, price)`, `Restaurant.RemoveMenuItem(menuItemId) → bool`
+- **New endpoints:** `PUT /{id}/menu-items/{itemId}`, `DELETE /{id}/menu-items/{itemId}`, `GET /{id}/menu-items`
+- Controller slimmed to pure HTTP dispatch — zero business logic
+- **Role fixed:** all `[Authorize(Roles = "RestaurantOwner")]` → `"RestaurantManager"` throughout
+- `UserRole` enum: `RestaurantOwner = 2` → `RestaurantManager = 2` (int value unchanged — no DB impact)
+
+**ApiGateway — full routing (Step 2):**
+- All 6 services routed: auth→5001, restaurant→5002, order→5003, payment→5004, notification→5005, delivery→5006
+- JWT validation wired via `BuildingBlocks/Auth` (`AddJwtAuthentication`) + `UseAuthentication/UseAuthorization`
+- `X-Correlation-Id` middleware: generates a new GUID if header absent; YARP forwards it automatically to all downstream services
+- Swagger UI aggregates all 6 services (payment + notification added)
+- Auth BuildingBlock added as ProjectReference to ApiGateway.csproj
+
+**OrderService — CQRS + status endpoint (Step 3):**
+- Commands: `PlaceOrderCommand + PlaceOrderCommandHandler` (full validation + outbox), `UpdateOrderStatusCommand + UpdateOrderStatusCommandHandler`
+- Queries: `GetOrderByIdQuery + GetOrderByIdQueryHandler` (ownership check), `GetOrdersByClientQuery + GetOrdersByClientQueryHandler`
+- `CommandResult` with `UnprocessableEntity` status + `Error` message; generic `QueryResult<T>` (Success/NotFound/Forbidden)
+- Domain: `OrderDomainException`; `StartPreparation()` and `MarkReadyForDelivery()` now throw on invalid state
+- **New endpoint:** `PATCH /api/orders/{id}/status [RestaurantManager]` — allows `InPreparation`, `ReadyForDelivery` transitions
+- Controller fully slimmed
+
+**PaymentService — controller added (Step 4):**
+- `IPaymentRepository.GetByOrderIdAsync` + implementation
+- `GetPaymentByOrderIdQueryHandler`, `PaymentResponse` DTO
+- `PaymentsController`: `GET /api/payments/{orderId} [Authorize]`
+- Swagger enabled in all environments
+
+**NotificationService — controller added (Step 5):**
+- `INotificationRepository.GetByUserIdAsync` (ordered by CreatedAt desc) + implementation
+- `GetNotificationsByUserQueryHandler`, `NotificationResponse` DTO
+- `NotificationsController`: `GET /api/notifications [Authorize]` (scoped to current user)
+- Swagger enabled in all environments
+
+**DeliveryService — full CQRS + new endpoint (Step 6):**
+- `IDeliveryRepository.GetByCourierIdAsync` + implementation
+- Commands: `AssignDelivery`, `PickupDelivery`, `CompleteDelivery` (+ handlers; `CompleteDelivery` publishes `DeliveryCompletedEvent` via IEventBus)
+- Queries: `GetDeliveryById`, `GetDeliveriesByCourier` (+ handlers)
+- `DeliveryResponse.FromDomain()` DTO factory
+- **New endpoint:** `GET /api/deliveries [Courier]` — lists courier's own deliveries
+- Controller fully slimmed; EventBus added as ProjectReference to Application csproj
+
+**AuthService — RefreshToken (Step 9):**
+- `User` entity: `RefreshToken (string?)`, `RefreshTokenExpiry (DateTime?)`, `SetRefreshToken(token, expiry)` method
+- `IJwtProvider.GenerateRefreshToken()` → cryptographically random base64(64 bytes)
+- `IUserRepository.GetByRefreshTokenAsync` + implementation
+- `AuthResponse`: now returns both `AccessToken` + `RefreshToken`
+- `POST /api/auth/refresh` endpoint: validates token, checks expiry, rotates (7-day sliding window)
+- Register and Login now issue + persist refresh tokens atomically
+- EF migration `20260529000000_AddRefreshToken` — adds `RefreshToken`, `RefreshTokenExpiry` columns to `Users` table
+
+**Unit tests — xUnit/Moq/FluentAssertions (Step 7):**
+- `Directory.Packages.props`: added xunit 2.9.2, Moq 4.20.72, FluentAssertions 6.12.0, Microsoft.NET.Test.Sdk 17.12.0, coverlet.collector 6.0.2
+- `tests/AuthService.Tests` (21 tests): `UserEntityTests`, `JwtProviderTests`, `AuthControllerTests` (register/login/refresh all paths)
+- `tests/OrderService.Tests` (26 tests): `OrderAggregateTests` (all transitions + domain exceptions), `OrderItemTests`, `PlaceOrderCommandHandlerTests`, `UpdateOrderStatusCommandHandlerTests`
+- `tests/PaymentService.Tests` (13 tests): `PaymentEntityTests` (all states), `GetPaymentByOrderIdQueryHandlerTests`
+- **60 tests, 0 failures** — `dotnet test` confirmed passing
+
+### CQRS handler pattern (used in all services from this session)
+- Command/query class + handler class live in the **same file** under `Application/Commands/` or `Application/Queries/`
+- Handlers are registered as `Scoped` in Infrastructure `DependencyInjection.cs`
+- Controllers inject handlers directly (no MediatR)
+- `CommandResult` / `QueryResult<T>` in `Application/Common/` per service — controllers switch on status, return HTTP result
+
+### Service port map (local development)
+| Service | Port |
+|---|---|
+| AuthService | 5001 |
+| RestaurantService | 5002 |
+| OrderService | 5003 |
+| PaymentService | 5004 |
+| NotificationService | 5005 |
+| DeliveryService | 5006 |
+| ApiGateway | (default, proxies all above) |
 
 ### Remaining known issues (cosmetic, not blocking)
 - DataProtection warning on all services (keys not persisted outside container) — harmless for MVP
-- `RestaurantOwner` role string in RestaurantService controller vs `RestaurantManager` in CONTEXT.md — inconsistency inherited from original code
+- docker-compose service ports may differ from local dev ports above — check docker-compose env var overrides before running locally
 
 ### Nothing left to implement for MVP
-All services complete. Next session could focus on:
-1. Merging to master (PR review + merge)
-2. Testing the full order flow end-to-end via the API Gateway
-3. Fixing the RestaurantOwner vs RestaurantManager role inconsistency if needed
+All services, CQRS application layers, unit tests, and documentation are complete.
+Next steps if needed:
+1. End-to-end smoke test: `docker-compose up --build`, register user, place order, verify full saga
+2. Additional test coverage: RestaurantService and DeliveryService handlers
+3. Integration tests with real DB (TestContainers)

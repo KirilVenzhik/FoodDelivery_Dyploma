@@ -31,8 +31,8 @@ public class UserEntityTests
     [Fact]
     public void Create_SetsRole()
     {
-        var user = User.Create("test@example.com", "hash", UserRole.RestaurantOwner);
-        user.Role.Should().Be(UserRole.RestaurantOwner);
+        var user = User.Create("test@example.com", "hash", UserRole.RestaurantManager);
+        user.Role.Should().Be(UserRole.RestaurantManager);
     }
 
     [Fact]
