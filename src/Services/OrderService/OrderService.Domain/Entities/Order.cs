@@ -1,4 +1,5 @@
 using OrderService.Domain.Enums;
+using OrderService.Domain.Exceptions;
 using Shared.Primitives;
 
 namespace OrderService.Domain.Entities;
@@ -75,11 +76,15 @@ public class Order : Entity
 
     public void StartPreparation()
     {
+        if (Status != OrderStatus.Paid)
+            throw new OrderDomainException($"Cannot start preparation: order is in '{Status}' status.");
         Status = OrderStatus.InPreparation;
     }
 
     public void MarkReadyForDelivery()
     {
+        if (Status != OrderStatus.InPreparation)
+            throw new OrderDomainException($"Cannot mark ready for delivery: order is in '{Status}' status.");
         Status = OrderStatus.ReadyForDelivery;
     }
 

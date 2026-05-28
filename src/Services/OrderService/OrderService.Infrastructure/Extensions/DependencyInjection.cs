@@ -2,7 +2,9 @@ using EventBus.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using OrderService.Application.Commands;
 using OrderService.Application.Interfaces;
+using OrderService.Application.Queries;
 using OrderService.Infrastructure.BackgroundJobs;
 using OrderService.Infrastructure.Messaging;
 using OrderService.Infrastructure.Persistence;
@@ -27,6 +29,11 @@ public static class DependencyInjection
         });
 
         services.AddEventBus(configuration);
+
+        services.AddScoped<PlaceOrderCommandHandler>();
+        services.AddScoped<UpdateOrderStatusCommandHandler>();
+        services.AddScoped<GetOrderByIdQueryHandler>();
+        services.AddScoped<GetOrdersByClientQueryHandler>();
 
         services.AddHostedService<OutboxPublisherWorker>();
         services.AddHostedService<PaymentCompletedConsumer>();

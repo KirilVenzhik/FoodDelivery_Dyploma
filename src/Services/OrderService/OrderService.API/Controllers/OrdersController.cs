@@ -1,12 +1,10 @@
-using System.Text.Json;
 using Auth.Abstractions;
-using Contracts.Events;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using OrderService.Application.Commands;
+using OrderService.Application.Common;
 using OrderService.Application.DTOs;
-using OrderService.Application.Interfaces;
-using OrderService.Domain.Entities;
-using Shared.Primitives;
+using OrderService.Application.Queries;
 
 namespace OrderService.API.Controllers;
 
@@ -15,129 +13,88 @@ namespace OrderService.API.Controllers;
 [Authorize]
 public class OrdersController : ControllerBase
 {
-    private readonly IOrderRepository _orderRepository;
-    private readonly IRestaurantServiceClient _restaurantClient;
+    private readonly PlaceOrderCommandHandler _placeOrderHandler;
+    private readonly UpdateOrderStatusCommandHandler _updateStatusHandler;
+    private readonly GetOrderByIdQueryHandler _getByIdHandler;
+    private readonly GetOrdersByClientQueryHandler _getByClientHandler;
     private readonly ICurrentUser _currentUser;
 
     public OrdersController(
-        IOrderRepository orderRepository,
-        IRestaurantServiceClient restaurantClient,
+        PlaceOrderCommandHandler placeOrderHandler,
+        UpdateOrderStatusCommandHandler updateStatusHandler,
+        GetOrderByIdQueryHandler getByIdHandler,
+        GetOrdersByClientQueryHandler getByClientHandler,
         ICurrentUser currentUser)
     {
-        _orderRepository = orderRepository;
-        _restaurantClient = restaurantClient;
+        _placeOrderHandler = placeOrderHandler;
+        _updateStatusHandler = updateStatusHandler;
+        _getByIdHandler = getByIdHandler;
+        _getByClientHandler = getByClientHandler;
         _currentUser = currentUser;
     }
 
     [HttpPost]
     [Authorize(Roles = "Customer")]
-    public async Task<ActionResult<object>> Create(
+    public async Task<IActionResult> Create(
         CreateOrderRequest request,
         CancellationToken cancellationToken)
     {
-        var restaurant = await _restaurantClient
-            .GetRestaurantAsync(request.RestaurantId, cancellationToken);
+        var result = await _placeOrderHandler.HandleAsync(
+            new PlaceOrderCommand(_currentUser.UserId, request.RestaurantId, request.Items),
+            cancellationToken);
 
-        if (restaurant is null)
-            return NotFound("Restaurant not found.");
-
-        if (restaurant.Status != "Open")
-            return UnprocessableEntity("Restaurant is not accepting orders.");
-
-        var orderItems = new List<OrderItem>();
-
-        foreach (var itemRequest in request.Items)
+        return result.Status switch
         {
-            var menuItem = restaurant.MenuItems
-                .FirstOrDefault(m => m.Id == itemRequest.MenuItemId);
-
-            if (menuItem is null)
-                return UnprocessableEntity($"Menu item {itemRequest.MenuItemId} not found.");
-
-            if (!menuItem.IsAvailable)
-                return UnprocessableEntity($"Menu item '{menuItem.Name}' is not available.");
-
-            orderItems.Add(OrderItem.Create(
-                menuItem.Id,
-                menuItem.Name,
-                menuItem.Price,
-                itemRequest.Quantity));
-        }
-
-        var order = Order.Create(
-            _currentUser.UserId,
-            request.RestaurantId,
-            orderItems);
-
-        order.RequestPayment();
-
-        var paymentRequestedEvent = new PaymentRequestedEvent
-        {
-            CorrelationId = order.CorrelationId,
-            OrderId = order.Id,
-            ClientId = order.ClientId,
-            Amount = order.TotalAmount
+            CommandResultStatus.Success => Ok(new { orderId = result.CreatedId }),
+            CommandResultStatus.NotFound => NotFound(result.Error),
+            CommandResultStatus.UnprocessableEntity => UnprocessableEntity(result.Error),
+            _ => StatusCode(500)
         };
-
-        await _orderRepository.AddAsync(order, cancellationToken);
-
-        await _orderRepository.AddOutboxMessageAsync(new OutboxMessage
-        {
-            Id = Guid.NewGuid(),
-            Type = nameof(PaymentRequestedEvent),
-            Payload = JsonSerializer.Serialize(paymentRequestedEvent),
-            OccurredOnUtc = DateTime.UtcNow
-        }, cancellationToken);
-
-        await _orderRepository.SaveChangesAsync(cancellationToken);
-
-        return Ok(new { orderId = order.Id });
     }
 
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<OrderResponse>> GetById(
-        Guid id,
-        CancellationToken cancellationToken)
+    public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
-        var order = await _orderRepository.GetByIdAsync(id, cancellationToken);
+        var result = await _getByIdHandler.HandleAsync(
+            new GetOrderByIdQuery(id, _currentUser.UserId, _currentUser.Role ?? string.Empty),
+            cancellationToken);
 
-        if (order is null)
-            return NotFound();
-
-        if (order.ClientId != _currentUser.UserId
-            && _currentUser.Role != "Admin")
-            return Forbid();
-
-        return Ok(MapToResponse(order));
+        return result.Status switch
+        {
+            CommandResultStatus.Success => Ok(result.Value),
+            CommandResultStatus.NotFound => NotFound(),
+            CommandResultStatus.Forbidden => Forbid(),
+            _ => StatusCode(500)
+        };
     }
 
     [HttpGet]
-    public async Task<ActionResult<List<OrderResponse>>> GetMyOrders(
-        CancellationToken cancellationToken)
+    public async Task<IActionResult> GetMyOrders(CancellationToken cancellationToken)
     {
-        var orders = await _orderRepository
-            .GetByClientIdAsync(_currentUser.UserId, cancellationToken);
+        var orders = await _getByClientHandler.HandleAsync(
+            new GetOrdersByClientQuery(_currentUser.UserId),
+            cancellationToken);
 
-        return Ok(orders.Select(MapToResponse).ToList());
+        return Ok(orders);
     }
 
-    private static OrderResponse MapToResponse(Order order) =>
-        new()
+    [HttpPatch("{id:guid}/status")]
+    [Authorize(Roles = "RestaurantManager")]
+    public async Task<IActionResult> UpdateStatus(
+        Guid id,
+        UpdateOrderStatusRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _updateStatusHandler.HandleAsync(
+            new UpdateOrderStatusCommand(id, request.Status),
+            cancellationToken);
+
+        return result.Status switch
         {
-            Id = order.Id,
-            CorrelationId = order.CorrelationId,
-            ClientId = order.ClientId,
-            RestaurantId = order.RestaurantId,
-            TotalAmount = order.TotalAmount,
-            Status = order.Status.ToString(),
-            CreatedAtUtc = order.CreatedAtUtc,
-            Items = order.Items.Select(i => new OrderItemResponse
-            {
-                MenuItemId = i.MenuItemId,
-                ItemName = i.ItemName,
-                UnitPrice = i.UnitPrice,
-                Quantity = i.Quantity,
-                LineTotal = i.LineTotal
-            }).ToList()
+            CommandResultStatus.Success => NoContent(),
+            CommandResultStatus.NotFound => NotFound(),
+            CommandResultStatus.UnprocessableEntity => UnprocessableEntity(result.Error),
+            _ => StatusCode(500)
         };
+    }
 }
