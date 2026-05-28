@@ -482,3 +482,113 @@ Next steps if needed:
 1. End-to-end smoke test: `docker-compose up --build`, register user, place order, verify full saga
 2. Additional test coverage: RestaurantService and DeliveryService handlers
 3. Integration tests with real DB (TestContainers)
+
+---
+
+## Session Progress (2026-05-29, AuthService production polish)
+
+Branch: `master` (commit `20124bb`)
+
+### Goal
+Polish AuthService to production quality matching the diploma specification exactly.
+The service was previously functional but contained business logic directly in the controller
+(fat controller anti-pattern) and was missing several required domain building blocks.
+
+### Changes — Domain Layer (`AuthService.Domain`)
+
+**`UserRole` enum:**
+- `RestaurantManager = 2` → `RestaurantOwner = 2` (diploma spec requires `RestaurantOwner`)
+- **Note:** a previous session had renamed this to `RestaurantManager`; this session reverts that to match the diploma spec. The int value (2) is unchanged, so no DB migration needed. RestaurantService still uses the `"RestaurantManager"` role string in its `[Authorize]` attributes — that is a separate known inconsistency.
+
+**`User` entity (`Entities/User.cs`):**
+- Added `AssignRole(UserRole role)` method — updates role and raises `UserRoleAssignedDomainEvent`
+- Added `ChangePassword(string newPasswordHash)` method — updates password hash
+- `User.Create()` now raises `UserRegisteredDomainEvent` after construction
+
+**New: `Events/` folder:**
+- `UserRegisteredDomainEvent` — raised in `User.Create()`, carries `UserId` + `Email`, inherits `DomainEvent`
+- `UserRoleAssignedDomainEvent` — raised in `User.AssignRole()`, carries `UserId` + `NewRole`, inherits `DomainEvent`
+
+**New: `Exceptions/` folder:**
+- `UserAlreadyExistsException` — thrown by `RegisterUserCommandHandler` on duplicate email → 409
+- `InvalidCredentialsException` — thrown by `LoginUserCommandHandler` / `RefreshTokenCommandHandler` → 401
+- `UserNotFoundException` — thrown by `GetCurrentUserQueryHandler` on missing user → 404
+
+### Changes — Application Layer (`AuthService.Application`)
+
+**`IUserRepository`:** added `GetByIdAsync(Guid id, CancellationToken)` method.
+
+**`AuthResponse` DTO:** added `Guid UserId` and `string Role` fields (kept `RefreshToken`).
+
+**New: `DTOs/UserDto.cs`:** `Guid UserId`, `string Email`, `string Role`.
+
+**`RegisterRequestValidator`:** added `RuleFor(x => x.Role).IsInEnum()` validation.
+
+**New: `Commands/` folder** (command record + handler interface in one file, handler in separate file):
+- `RegisterUserCommand(Email, Password, Role)` + `IRegisterUserCommandHandler` + `RegisterUserCommandHandler`
+  — checks duplicate email (throws `UserAlreadyExistsException`), hashes password, calls `User.Create()`, issues refresh token, saves, returns `AuthResponse`
+- `LoginUserCommand(Email, Password)` + `ILoginUserCommandHandler` + `LoginUserCommandHandler`
+  — finds user by email, verifies password (throws `InvalidCredentialsException` on either failure), rotates refresh token, returns `AuthResponse`
+- `RefreshTokenCommand(RefreshToken)` + `IRefreshTokenCommandHandler` + `RefreshTokenCommandHandler`
+  — finds user by refresh token, validates expiry (throws `InvalidCredentialsException`), rotates token, returns `AuthResponse`
+
+**New: `Queries/` folder:**
+- `GetCurrentUserQuery(UserId)` + `IGetCurrentUserQueryHandler` + `GetCurrentUserQueryHandler`
+  — finds user by id (throws `UserNotFoundException`), returns `UserDto`
+
+### Changes — Infrastructure Layer (`AuthService.Infrastructure`)
+
+**`UserRepository`:** added `GetByIdAsync` implementation (EF `FirstOrDefaultAsync` by `x.Id == id`).
+
+**`DependencyInjection.cs`:**
+- Removed `ICurrentUser` registration (now handled exclusively by `AddAuthServices()` in Program.cs)
+- Added scoped registrations for all 4 handler interfaces → implementations
+- Connection string key changed: `"Database"` → `"DefaultConnection"` (matches diploma spec)
+- `docker-compose.yml` env var updated accordingly: `ConnectionStrings__Database` → `ConnectionStrings__DefaultConnection`
+
+### Changes — API Layer (`AuthService.API`)
+
+**`AuthController` (slimmed to zero business logic):**
+- Constructor now injects 4 handler interfaces: `IRegisterUserCommandHandler`, `ILoginUserCommandHandler`, `IRefreshTokenCommandHandler`, `IGetCurrentUserQueryHandler`
+- Each action maps the incoming DTO to a command/query, calls the handler, returns the result
+- `POST /api/auth/register` → `RegisterUserCommand` → 201 Created + `AuthResponse`
+- `POST /api/auth/login` → `LoginUserCommand` → 200 OK + `AuthResponse`
+- `POST /api/auth/refresh` → `RefreshTokenCommand` → 200 OK + `AuthResponse`
+- `GET /api/auth/me [Authorize]` → `GetCurrentUserQuery` (UserId from `ICurrentUser` claims) → 200 OK + `UserDto`
+
+**New: `Middlewares/ExceptionHandlingMiddleware.cs`:**
+- `UserAlreadyExistsException` → 409 Conflict + JSON `{error}`
+- `InvalidCredentialsException` → 401 Unauthorized + JSON `{error}`
+- `UserNotFoundException` → 404 Not Found + JSON `{error}`
+- `ValidationException` (FluentValidation) → 400 Bad Request + JSON `{errors}` (grouped by field)
+- Unhandled `Exception` → 500 Internal Server Error + JSON `{error}`
+
+**`Program.cs`:**
+- Added `builder.Host.UseSerilog(...)` reading from configuration
+- Added `builder.Services.AddCorrelation()`
+- Added `app.UseMiddleware<ExceptionHandlingMiddleware>()` (before routing)
+- Added `app.UseCorrelation()`
+
+**`AuthService.API.csproj`:** added `Serilog.Sinks.Seq` package reference.
+
+**`appsettings.json`:**
+- Renamed `ConnectionStrings:Database` → `ConnectionStrings:DefaultConnection`
+- Removed generic `Logging` section (superseded by Serilog)
+- Added `Serilog` section: Console + Seq (`http://seq:5341`) sinks, min level Information, Microsoft/System overrides to Warning
+
+### Changes — Tests (`tests/AuthService.Tests`)
+
+**Deleted:**
+- `API/AuthControllerTests.cs` — tested fat controller, no longer relevant
+- `Infrastructure/JwtProviderTests.cs` — infrastructure test, removed as part of full replacement
+
+**New (26 tests, 0 failures):**
+- `Domain/UserEntityTests.cs` (8 tests) — `Create` properties, `UserRegisteredDomainEvent` raised, `SetRefreshToken` happy + repeat, `AssignRole` updates role + raises `UserRoleAssignedDomainEvent`, `ChangePassword` updates hash, enum int values
+- `Application/RegisterUserCommandHandlerTests.cs` (5 tests) — returns `AuthResponse` on new email, throws `UserAlreadyExistsException` on duplicate, hashes password, saves user, does not save on duplicate
+- `Application/LoginUserCommandHandlerTests.cs` (5 tests) — valid credentials return `AuthResponse`, unknown email throws, wrong password throws, valid sets refresh token on user, invalid does not save
+- `Application/RefreshTokenCommandHandlerTests.cs` (4 tests) — valid token returns new response, invalid token throws, expired token throws, rotates refresh token and persists
+- `Application/GetCurrentUserQueryHandlerTests.cs` (4 tests) — found user returns `UserDto`, missing user throws `UserNotFoundException`, queries correct id, role is string representation
+
+### Final state
+- `dotnet build` — 0 errors, 0 warnings
+- `dotnet test tests/AuthService.Tests` — 26/26 passed
