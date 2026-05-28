@@ -359,13 +359,40 @@ All inherit `Contracts.Abstractions.IntegrationEvent`. All in namespace `Contrac
 - Added `GET /api/restaurants/{restaurantId}` [Authorize] — returns single restaurant same shape
 - Both endpoints return Status as `.ToString()` so OrderService can compare with "Open"
 
-### Exact next step to continue
-**ApiGateway** (YARP):
-1. Add `Yarp.ReverseProxy` to `Directory.Packages.props`
-2. Add `Yarp.ReverseProxy` PackageReference to `ApiGateway.csproj`
-3. Read existing `ApiGateway` Program.cs and appsettings first
-4. Configure YARP routes for all 5 services (Auth, Restaurant, Order, Payment, Delivery)
-   - NotificationService has no REST endpoints — skip
-   - Typical YARP config: routes + clusters in appsettings.json
+**ApiGateway** — complete (YARP 2.3.0):
+- `Directory.Packages.props`: added `Yarp.ReverseProxy 2.3.0`
+- `ApiGateway.csproj`: only `Yarp.ReverseProxy` package reference
+- `Program.cs`: `AddReverseProxy().LoadFromConfig(...)` + `MapReverseProxy()`
+- `appsettings.json`: 4 routes + 4 clusters (auth_cluster, restaurant_cluster, order_cluster, delivery_cluster) — underscore IDs for env var override compatibility
+- Local addresses: auth→:5262, restaurant→:5265, order→:5223, delivery→:5085
 
-**Then docker-compose.yml** (add all service containers + postgres DBs + RabbitMQ)
+**docker-compose.yml** — complete and verified running:
+- All 6 postgres DBs with `pg_isready` healthchecks
+- 6 service containers + api-gateway (build context: `.` repo root)
+- Env var overrides for DB connection strings (container hostnames) and YARP cluster addresses
+- Services wait for DB `service_healthy` + rabbitmq `service_healthy`
+- `Database.Migrate()` added to all 6 service `Program.cs` files — migrations run automatically on first `docker-compose up`
+- `.dockerignore` at repo root; 7 Dockerfiles in `src/Services/{Name}/Dockerfile` + `src/ApiGateway/Dockerfile`
+- DeliveryService appsettings port fixed: 5440→5437 to match docker-compose
+
+### Verified running
+`docker-compose up --build` completed successfully:
+- All 7 images built (sdk:9.0 → aspnet:9.0 multi-stage)
+- All 6 DB migrations applied on first boot
+- All services: `Application started. Now listening on: http://[::]:8080`
+- RabbitMQ: all consumer connections established
+- OrderService Outbox worker polling every 2s (expected steady-state)
+
+### Branch status
+`feature/implement-services` pushed to GitHub. PR can be opened at:
+https://github.com/KirilVenzhik/food-delivery-dyploma/pull/new/feature/implement-services
+
+### Remaining known issues (cosmetic, not blocking)
+- DataProtection warning on all services (keys not persisted outside container) — harmless for MVP
+- `RestaurantOwner` role string in RestaurantService controller vs `RestaurantManager` in CONTEXT.md — inconsistency inherited from original code
+
+### Nothing left to implement for MVP
+All services complete. Next session could focus on:
+1. Merging to master (PR review + merge)
+2. Testing the full order flow end-to-end via the API Gateway
+3. Fixing the RestaurantOwner vs RestaurantManager role inconsistency if needed
