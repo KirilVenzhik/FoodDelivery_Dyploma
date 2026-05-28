@@ -11,4 +11,8 @@
     <PackageReference Include="Swashbuckle.AspNetCore" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\BuildingBlocks\Auth\Auth.csproj" />
+  </ItemGroup>
+
 </Project>

@@ -31,6 +31,12 @@ public class MenuItem : Entity
         };
     }
 
+    public void Update(string name, decimal price)
+    {
+        Name = name;
+        Price = price;
+    }
+
     public void SetAvailability(bool available)
     {
         IsAvailable = available;

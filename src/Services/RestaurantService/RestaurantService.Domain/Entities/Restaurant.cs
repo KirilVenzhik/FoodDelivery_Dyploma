@@ -54,4 +54,12 @@ public class Restaurant : Entity
 
         return menuItem;
     }
+
+    public bool RemoveMenuItem(Guid menuItemId)
+    {
+        var item = _menuItems.FirstOrDefault(m => m.Id == menuItemId);
+        if (item is null) return false;
+        _menuItems.Remove(item);
+        return true;
+    }
 }
