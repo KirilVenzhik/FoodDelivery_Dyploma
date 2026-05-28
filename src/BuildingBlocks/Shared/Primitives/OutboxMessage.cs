@@ -10,5 +10,7 @@ public class OutboxMessage
 
     public DateTime OccurredOnUtc { get; set; }
 
+    public bool Processed { get; set; }
+
     public DateTime? ProcessedOnUtc { get; set; }
 }

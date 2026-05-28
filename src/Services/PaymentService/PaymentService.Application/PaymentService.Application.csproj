@@ -6,16 +6,6 @@
     <ProjectReference Include="..\..\..\BuildingBlocks\Shared\Shared.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Behaviors\" />
-    <Folder Include="Commands\" />
-    <Folder Include="DTOs\" />
-    <Folder Include="Interfaces\" />
-    <Folder Include="Queries\" />
-    <Folder Include="Services\" />
-    <Folder Include="Validators\" />
-  </ItemGroup>
-
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
