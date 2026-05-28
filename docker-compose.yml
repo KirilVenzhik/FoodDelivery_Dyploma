@@ -181,7 +181,7 @@ services:
       - food-delivery-network
     environment:
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Database: "Host=auth-db;Port=5432;Database=auth_db;Username=postgres;Password=postgres"
+      ConnectionStrings__DefaultConnection: "Host=auth-db;Port=5432;Database=auth_db;Username=postgres;Password=postgres"
       Jwt__Issuer: food-delivery
       Jwt__Audience: food-delivery
       Jwt__SecretKey: SUPER_SECRET_DEVELOPMENT_KEY_123456789

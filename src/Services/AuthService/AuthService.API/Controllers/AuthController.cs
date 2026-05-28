@@ -1,6 +1,7 @@
 using Auth.Abstractions;
+using AuthService.Application.Commands;
 using AuthService.Application.DTOs;
-using AuthService.Application.Interfaces;
+using AuthService.Application.Queries;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,18 +11,21 @@ namespace AuthService.API.Controllers;
 [Route("api/auth")]
 public class AuthController : ControllerBase
 {
-    private readonly IUserRepository _userRepository;
-    private readonly IPasswordHasher _passwordHasher;
-    private readonly IJwtProvider _jwtProvider;
+    private readonly IRegisterUserCommandHandler _registerHandler;
+    private readonly ILoginUserCommandHandler _loginHandler;
+    private readonly IRefreshTokenCommandHandler _refreshHandler;
+    private readonly IGetCurrentUserQueryHandler _getCurrentUserHandler;
 
     public AuthController(
-        IUserRepository userRepository,
-        IPasswordHasher passwordHasher,
-        IJwtProvider jwtProvider)
+        IRegisterUserCommandHandler registerHandler,
+        ILoginUserCommandHandler loginHandler,
+        IRefreshTokenCommandHandler refreshHandler,
+        IGetCurrentUserQueryHandler getCurrentUserHandler)
     {
-        _userRepository = userRepository;
-        _passwordHasher = passwordHasher;
-        _jwtProvider = jwtProvider;
+        _registerHandler = registerHandler;
+        _loginHandler = loginHandler;
+        _refreshHandler = refreshHandler;
+        _getCurrentUserHandler = getCurrentUserHandler;
     }
 
     [HttpPost("register")]
@@ -29,26 +33,11 @@ public class AuthController : ControllerBase
         RegisterRequest request,
         CancellationToken cancellationToken)
     {
-        var exists = await _userRepository
-            .ExistsByEmailAsync(request.Email, cancellationToken);
+        var response = await _registerHandler.HandleAsync(
+            new RegisterUserCommand(request.Email, request.Password, request.Role),
+            cancellationToken);
 
-        if (exists)
-            return Conflict("Email already exists.");
-
-        var passwordHash = _passwordHasher.Hash(request.Password);
-        var user = Domain.Entities.User.Create(request.Email, passwordHash, request.Role);
-
-        var refreshToken = _jwtProvider.GenerateRefreshToken();
-        user.SetRefreshToken(refreshToken, DateTime.UtcNow.AddDays(7));
-
-        await _userRepository.AddAsync(user, cancellationToken);
-        await _userRepository.SaveChangesAsync(cancellationToken);
-
-        return Ok(new AuthResponse
-        {
-            AccessToken = _jwtProvider.Generate(user),
-            RefreshToken = refreshToken
-        });
+        return CreatedAtAction(nameof(Register), response);
     }
 
     [HttpPost("login")]
@@ -56,24 +45,11 @@ public class AuthController : ControllerBase
         LoginRequest request,
         CancellationToken cancellationToken)
     {
-        var user = await _userRepository
-            .GetByEmailAsync(request.Email, cancellationToken);
+        var response = await _loginHandler.HandleAsync(
+            new LoginUserCommand(request.Email, request.Password),
+            cancellationToken);
 
-        if (user is null)
-            return Unauthorized();
-
-        if (!_passwordHasher.Verify(request.Password, user.PasswordHash))
-            return Unauthorized();
-
-        var refreshToken = _jwtProvider.GenerateRefreshToken();
-        user.SetRefreshToken(refreshToken, DateTime.UtcNow.AddDays(7));
-        await _userRepository.SaveChangesAsync(cancellationToken);
-
-        return Ok(new AuthResponse
-        {
-            AccessToken = _jwtProvider.Generate(user),
-            RefreshToken = refreshToken
-        });
+        return Ok(response);
     }
 
     [HttpPost("refresh")]
@@ -81,36 +57,23 @@ public class AuthController : ControllerBase
         RefreshTokenRequest request,
         CancellationToken cancellationToken)
     {
-        var user = await _userRepository
-            .GetByRefreshTokenAsync(request.RefreshToken, cancellationToken);
+        var response = await _refreshHandler.HandleAsync(
+            new RefreshTokenCommand(request.RefreshToken),
+            cancellationToken);
 
-        if (user is null || user.RefreshTokenExpiry < DateTime.UtcNow)
-            return Unauthorized("Invalid or expired refresh token.");
-
-        var newRefreshToken = _jwtProvider.GenerateRefreshToken();
-        user.SetRefreshToken(newRefreshToken, DateTime.UtcNow.AddDays(7));
-        await _userRepository.SaveChangesAsync(cancellationToken);
-
-        return Ok(new AuthResponse
-        {
-            AccessToken = _jwtProvider.Generate(user),
-            RefreshToken = newRefreshToken
-        });
+        return Ok(response);
     }
 
     [Authorize]
     [HttpGet("me")]
-    public IActionResult Me([FromServices] ICurrentUser currentUser)
+    public async Task<ActionResult<UserDto>> Me(
+        [FromServices] ICurrentUser currentUser,
+        CancellationToken cancellationToken)
     {
-        return Ok(new
-        {
-            currentUser.UserId,
-            currentUser.Email,
-            currentUser.Role
-        });
-    }
+        var result = await _getCurrentUserHandler.HandleAsync(
+            new GetCurrentUserQuery(currentUser.UserId),
+            cancellationToken);
 
-    [Authorize(Roles = "Admin")]
-    [HttpGet("admin-only")]
-    public IActionResult AdminOnly() => Ok("You are admin.");
+        return Ok(result);
+    }
 }

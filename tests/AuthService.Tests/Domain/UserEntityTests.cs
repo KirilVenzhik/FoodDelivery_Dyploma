@@ -1,6 +1,6 @@
-using Xunit;
 using AuthService.Domain.Entities;
 using AuthService.Domain.Enums;
+using AuthService.Domain.Events;
 using FluentAssertions;
 
 namespace AuthService.Tests.Domain;
@@ -8,48 +8,30 @@ namespace AuthService.Tests.Domain;
 public class UserEntityTests
 {
     [Fact]
-    public void Create_SetsIdAsNewGuid()
-    {
-        var user = User.Create("test@example.com", "hash", UserRole.Customer);
-        user.Id.Should().NotBe(Guid.Empty);
-    }
-
-    [Fact]
-    public void Create_SetsEmail()
-    {
-        var user = User.Create("test@example.com", "hash", UserRole.Customer);
-        user.Email.Should().Be("test@example.com");
-    }
-
-    [Fact]
-    public void Create_SetsPasswordHash()
-    {
-        var user = User.Create("test@example.com", "hashed_pw", UserRole.Customer);
-        user.PasswordHash.Should().Be("hashed_pw");
-    }
-
-    [Fact]
-    public void Create_SetsRole()
-    {
-        var user = User.Create("test@example.com", "hash", UserRole.RestaurantManager);
-        user.Role.Should().Be(UserRole.RestaurantManager);
-    }
-
-    [Fact]
-    public void Create_SetsCreatedAtUtcToNow()
+    public void Create_SetsAllProperties()
     {
         var before = DateTime.UtcNow;
         var user = User.Create("test@example.com", "hash", UserRole.Customer);
         var after = DateTime.UtcNow;
+
+        user.Id.Should().NotBe(Guid.Empty);
+        user.Email.Should().Be("test@example.com");
+        user.PasswordHash.Should().Be("hash");
+        user.Role.Should().Be(UserRole.Customer);
         user.CreatedAtUtc.Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
+        user.RefreshToken.Should().BeNull();
+        user.RefreshTokenExpiry.Should().BeNull();
     }
 
     [Fact]
-    public void Create_RefreshTokenIsNull()
+    public void Create_RaisesUserRegisteredDomainEvent()
     {
         var user = User.Create("test@example.com", "hash", UserRole.Customer);
-        user.RefreshToken.Should().BeNull();
-        user.RefreshTokenExpiry.Should().BeNull();
+
+        var evt = user.DomainEvents.OfType<UserRegisteredDomainEvent>().SingleOrDefault();
+        evt.Should().NotBeNull();
+        evt!.UserId.Should().Be(user.Id);
+        evt.Email.Should().Be("test@example.com");
     }
 
     [Fact]
@@ -73,5 +55,48 @@ public class UserEntityTests
         user.SetRefreshToken("token-2", DateTime.UtcNow.AddDays(14));
 
         user.RefreshToken.Should().Be("token-2");
+    }
+
+    [Fact]
+    public void AssignRole_UpdatesRole()
+    {
+        var user = User.Create("test@example.com", "hash", UserRole.Customer);
+
+        user.AssignRole(UserRole.Admin);
+
+        user.Role.Should().Be(UserRole.Admin);
+    }
+
+    [Fact]
+    public void AssignRole_RaisesUserRoleAssignedDomainEvent()
+    {
+        var user = User.Create("test@example.com", "hash", UserRole.Customer);
+        user.ClearDomainEvents();
+
+        user.AssignRole(UserRole.Courier);
+
+        var evt = user.DomainEvents.OfType<UserRoleAssignedDomainEvent>().SingleOrDefault();
+        evt.Should().NotBeNull();
+        evt!.UserId.Should().Be(user.Id);
+        evt.NewRole.Should().Be("Courier");
+    }
+
+    [Fact]
+    public void ChangePassword_UpdatesPasswordHash()
+    {
+        var user = User.Create("test@example.com", "old-hash", UserRole.Customer);
+
+        user.ChangePassword("new-hash");
+
+        user.PasswordHash.Should().Be("new-hash");
+    }
+
+    [Fact]
+    public void UserRole_HasCorrectValues()
+    {
+        ((int)UserRole.Customer).Should().Be(1);
+        ((int)UserRole.RestaurantOwner).Should().Be(2);
+        ((int)UserRole.Courier).Should().Be(3);
+        ((int)UserRole.Admin).Should().Be(4);
     }
 }

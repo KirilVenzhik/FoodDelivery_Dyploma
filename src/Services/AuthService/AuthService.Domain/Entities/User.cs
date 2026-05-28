@@ -1,4 +1,5 @@
-﻿using AuthService.Domain.Enums;
+using AuthService.Domain.Enums;
+using AuthService.Domain.Events;
 using Shared.Primitives;
 
 namespace AuthService.Domain.Entities;
@@ -27,12 +28,24 @@ public class User : Entity
         RefreshTokenExpiry = expiry;
     }
 
-    public static User Create(
-        string email,
-        string passwordHash,
-        UserRole role)
+    public void AssignRole(UserRole role)
     {
-        return new User
+        Role = role;
+        RaiseDomainEvent(new UserRoleAssignedDomainEvent
+        {
+            UserId = Id,
+            NewRole = role.ToString()
+        });
+    }
+
+    public void ChangePassword(string newPasswordHash)
+    {
+        PasswordHash = newPasswordHash;
+    }
+
+    public static User Create(string email, string passwordHash, UserRole role)
+    {
+        var user = new User
         {
             Id = Guid.NewGuid(),
             Email = email,
@@ -40,5 +53,13 @@ public class User : Entity
             Role = role,
             CreatedAtUtc = DateTime.UtcNow
         };
+
+        user.RaiseDomainEvent(new UserRegisteredDomainEvent
+        {
+            UserId = user.Id,
+            Email = user.Email
+        });
+
+        return user;
     }
 }
