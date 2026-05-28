@@ -17,6 +17,16 @@ public class User : Entity
 
     public DateTime CreatedAtUtc { get; private set; }
 
+    public string? RefreshToken { get; private set; }
+
+    public DateTime? RefreshTokenExpiry { get; private set; }
+
+    public void SetRefreshToken(string token, DateTime expiry)
+    {
+        RefreshToken = token;
+        RefreshTokenExpiry = expiry;
+    }
+
     public static User Create(
         string email,
         string passwordHash,

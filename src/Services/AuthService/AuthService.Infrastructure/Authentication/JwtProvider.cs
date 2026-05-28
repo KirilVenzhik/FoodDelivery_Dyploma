@@ -1,5 +1,6 @@
 ﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using Auth.Jwt;
 using AuthService.Application.Interfaces;
@@ -43,5 +44,10 @@ public class JwtProvider : IJwtProvider
 
         return new JwtSecurityTokenHandler()
             .WriteToken(token);
+    }
+
+    public string GenerateRefreshToken()
+    {
+        return Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
     }
 }

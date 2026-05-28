@@ -1,8 +1,8 @@
-﻿using AuthService.Application.DTOs;
+using Auth.Abstractions;
+using AuthService.Application.DTOs;
 using AuthService.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Auth.Abstractions;
 
 namespace AuthService.API.Controllers;
 
@@ -30,35 +30,24 @@ public class AuthController : ControllerBase
         CancellationToken cancellationToken)
     {
         var exists = await _userRepository
-            .ExistsByEmailAsync(
-                request.Email,
-                cancellationToken);
+            .ExistsByEmailAsync(request.Email, cancellationToken);
 
         if (exists)
-        {
             return Conflict("Email already exists.");
-        }
 
-        var passwordHash = _passwordHasher
-            .Hash(request.Password);
+        var passwordHash = _passwordHasher.Hash(request.Password);
+        var user = Domain.Entities.User.Create(request.Email, passwordHash, request.Role);
 
-        var user = Domain.Entities.User.Create(
-            request.Email,
-            passwordHash,
-            request.Role);
+        var refreshToken = _jwtProvider.GenerateRefreshToken();
+        user.SetRefreshToken(refreshToken, DateTime.UtcNow.AddDays(7));
 
-        await _userRepository.AddAsync(
-            user,
-            cancellationToken);
-
-        await _userRepository.SaveChangesAsync(
-            cancellationToken);
-
-        var token = _jwtProvider.Generate(user);
+        await _userRepository.AddAsync(user, cancellationToken);
+        await _userRepository.SaveChangesAsync(cancellationToken);
 
         return Ok(new AuthResponse
         {
-            AccessToken = token
+            AccessToken = _jwtProvider.Generate(user),
+            RefreshToken = refreshToken
         });
     }
 
@@ -68,37 +57,50 @@ public class AuthController : ControllerBase
         CancellationToken cancellationToken)
     {
         var user = await _userRepository
-            .GetByEmailAsync(
-                request.Email,
-                cancellationToken);
+            .GetByEmailAsync(request.Email, cancellationToken);
 
         if (user is null)
-        {
             return Unauthorized();
-        }
 
-        var validPassword = _passwordHasher
-            .Verify(
-                request.Password,
-                user.PasswordHash);
-
-        if (!validPassword)
-        {
+        if (!_passwordHasher.Verify(request.Password, user.PasswordHash))
             return Unauthorized();
-        }
 
-        var token = _jwtProvider.Generate(user);
+        var refreshToken = _jwtProvider.GenerateRefreshToken();
+        user.SetRefreshToken(refreshToken, DateTime.UtcNow.AddDays(7));
+        await _userRepository.SaveChangesAsync(cancellationToken);
 
         return Ok(new AuthResponse
         {
-            AccessToken = token
+            AccessToken = _jwtProvider.Generate(user),
+            RefreshToken = refreshToken
+        });
+    }
+
+    [HttpPost("refresh")]
+    public async Task<ActionResult<AuthResponse>> Refresh(
+        RefreshTokenRequest request,
+        CancellationToken cancellationToken)
+    {
+        var user = await _userRepository
+            .GetByRefreshTokenAsync(request.RefreshToken, cancellationToken);
+
+        if (user is null || user.RefreshTokenExpiry < DateTime.UtcNow)
+            return Unauthorized("Invalid or expired refresh token.");
+
+        var newRefreshToken = _jwtProvider.GenerateRefreshToken();
+        user.SetRefreshToken(newRefreshToken, DateTime.UtcNow.AddDays(7));
+        await _userRepository.SaveChangesAsync(cancellationToken);
+
+        return Ok(new AuthResponse
+        {
+            AccessToken = _jwtProvider.Generate(user),
+            RefreshToken = newRefreshToken
         });
     }
 
     [Authorize]
     [HttpGet("me")]
-    public IActionResult Me(
-    [FromServices] ICurrentUser currentUser)
+    public IActionResult Me([FromServices] ICurrentUser currentUser)
     {
         return Ok(new
         {
@@ -110,8 +112,5 @@ public class AuthController : ControllerBase
 
     [Authorize(Roles = "Admin")]
     [HttpGet("admin-only")]
-    public IActionResult AdminOnly()
-    {
-        return Ok("You are admin.");
-    }
+    public IActionResult AdminOnly() => Ok("You are admin.");
 }

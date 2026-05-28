@@ -16,6 +16,10 @@ public interface IUserRepository
         string email,
         CancellationToken cancellationToken = default);
 
+    Task<User?> GetByRefreshTokenAsync(
+        string refreshToken,
+        CancellationToken cancellationToken = default);
+
     Task SaveChangesAsync(
         CancellationToken cancellationToken = default);
 }

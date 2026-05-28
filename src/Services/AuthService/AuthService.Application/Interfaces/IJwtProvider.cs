@@ -5,4 +5,6 @@ namespace AuthService.Application.Interfaces;
 public interface IJwtProvider
 {
     string Generate(User user);
+
+    string GenerateRefreshToken();
 }

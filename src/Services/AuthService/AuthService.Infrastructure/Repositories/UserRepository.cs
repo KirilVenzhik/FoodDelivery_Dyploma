@@ -44,6 +44,16 @@ public class UserRepository : IUserRepository
                 cancellationToken);
     }
 
+    public async Task<User?> GetByRefreshTokenAsync(
+        string refreshToken,
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Users
+            .FirstOrDefaultAsync(
+                x => x.RefreshToken == refreshToken,
+                cancellationToken);
+    }
+
     public async Task SaveChangesAsync(
         CancellationToken cancellationToken = default)
     {
