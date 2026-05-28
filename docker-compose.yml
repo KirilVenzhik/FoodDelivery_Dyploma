@@ -1,0 +1,131 @@
+version: '3.9'
+
+networks:
+  food-delivery-network:
+
+volumes:
+  auth-db-data:
+  order-db-data:
+  restaurant-db-data:
+  payment-db-data:
+  delivery-db-data:
+  notification-db-data:
+
+services:
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    hostname: rabbitmq
+    networks:
+      - food-delivery-network
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: rabbitmq-diagnostics check_port_connectivity
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  seq:
+    image: datalust/seq
+    container_name: seq
+    hostname: seq
+    networks:
+      - food-delivery-network
+    environment:
+      ACCEPT_EULA: Y
+      SEQ_FIRSTRUN_NOAUTHENTICATION: "true"
+    ports:
+      - "8081:80"
+
+  auth-db:
+    image: postgres:16
+    container_name: auth-db
+    hostname: auth-db
+    networks:
+      - food-delivery-network
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - auth-db-data:/var/lib/postgresql/data
+
+  order-db:
+    image: postgres:16
+    container_name: order-db
+    hostname: order-db
+    networks:
+      - food-delivery-network
+    environment:
+      POSTGRES_DB: order_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - order-db-data:/var/lib/postgresql/data
+
+  restaurant-db:
+    image: postgres:16
+    container_name: restaurant-db
+    hostname: restaurant-db
+    networks:
+      - food-delivery-network
+    environment:
+      POSTGRES_DB: restaurant_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5435:5432"
+    volumes:
+      - restaurant-db-data:/var/lib/postgresql/data
+
+  payment-db:
+    image: postgres:16
+    container_name: payment-db
+    hostname: payment-db
+    networks:
+      - food-delivery-network
+    environment:
+      POSTGRES_DB: payment_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5436:5432"
+    volumes:
+      - payment-db-data:/var/lib/postgresql/data
+
+  delivery-db:
+    image: postgres:16
+    container_name: delivery-db
+    hostname: delivery-db
+    networks:
+      - food-delivery-network
+    environment:
+      POSTGRES_DB: delivery_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5437:5432"
+    volumes:
+      - delivery-db-data:/var/lib/postgresql/data
+
+  notification-db:
+    image: postgres:16
+    container_name: notification-db
+    hostname: notification-db
+    networks:
+      - food-delivery-network
+    environment:
+      POSTGRES_DB: notification_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5438:5432"
+    volumes:
+      - notification-db-data:/var/lib/postgresql/data
