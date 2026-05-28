@@ -281,3 +281,76 @@ Contains: OrderService and PaymentService demo implementations
 4. **DeliveryService** — delivery coordination
 5. **API Gateway routes** — add routes for all new services
 6. **docker-compose.yml** — complete for all services
+
+---
+
+## Session Progress (2026-05-28)
+
+Branch: `feature/implement-services`
+
+### Completed
+
+**BuildingBlocks/Contracts/Events/** — 6 new integration event classes:
+`PaymentRequestedEvent`, `PaymentCompletedEvent`, `PaymentFailedEvent`,
+`NotificationRequestedEvent`, `DeliveryRequestedEvent`, `DeliveryCompletedEvent`
+All inherit `Contracts.Abstractions.IntegrationEvent`. All in namespace `Contracts.Events`.
+
+**BuildingBlocks/Shared/Primitives/OutboxMessage.cs** — added `bool Processed` property.
+
+**Directory.Packages.props** — added `Microsoft.Extensions.Http 9.0.0`.
+
+**OrderService** — complete (all 4 layers + EF migration):
+- Domain: `Order` aggregate, `OrderItem` entity, `OrderStatus` enum
+- Application: `IOrderRepository` (includes `AddOutboxMessageAsync`), `IRestaurantServiceClient`, 6 DTOs, `CreateOrderRequestValidator`
+- Infrastructure: `OrderDbContext`, 4 EF configs, `OrderRepository`, `RestaurantServiceHttpClient` (typed HttpClient), `OutboxPublisherWorker` (polls every 2s), `PaymentCompletedConsumer`, `PaymentFailedConsumer`, `DependencyInjection`
+- API: `OrdersController` (POST /api/orders [Customer], GET /api/orders/{id}, GET /api/orders), full `Program.cs`, `appsettings.json`
+- Migration: `20260528145126_InitialCreate` — tables: orders, order_items, outbox_messages, processed_events
+
+**PaymentService** — complete (all 4 layers + EF migration):
+- Domain: `Payment` entity, `PaymentStatus` enum (Pending/Completed/Failed)
+- Application: `IPaymentRepository`
+- Infrastructure: `PaymentDbContext`, `PaymentConfiguration`, `ProcessedEventConfiguration`, `PaymentRepository`, `PaymentRequestedConsumer` (simulates with Random), `DependencyInjection`
+- API: `Program.cs` (event-driven only, no controllers), `appsettings.json`
+- Migration: `20260528145659_InitialCreate` — tables: payments, processed_events
+
+### Decisions / Deviations
+- No MediatR used — consistent with AuthService/RestaurantService pattern (direct controller → repository)
+- `ProcessedEvent` is a service-local class in each service's `Infrastructure/Persistence/` (not from Shared) because PK column is `event_id` not `id`
+- `OutboxMessage.Processed` (bool) added to Shared — needed for Outbox worker query
+- PaymentService publishes events **directly** via IEventBus (no Outbox) — Outbox is only mandatory for OrderService per CONTEXT.md
+- `IOrderRepository.AddOutboxMessageAsync` added to allow atomic order+outbox save in one transaction from the controller
+- `Microsoft.Extensions.Hosting.Abstractions` must be explicitly referenced in each Infrastructure csproj for `BackgroundService`
+- Each API csproj needs `Microsoft.EntityFrameworkCore.Design` (design-time only) for `dotnet ef migrations` CLI
+
+### RabbitMQ routing keys (canonical)
+| Event | Routing Key | Publisher | Consumer queue pattern |
+|---|---|---|---|
+| PaymentRequestedEvent | `payment.requested` | OrderService Outbox | `payment-service.payment.requested` |
+| PaymentCompletedEvent | `payment.completed` | PaymentService | `order-service.payment.completed`, `notification-service.payment.completed`, `delivery-service.payment.completed` |
+| PaymentFailedEvent | `payment.failed` | PaymentService | `order-service.payment.failed`, `notification-service.payment.failed` |
+| NotificationRequestedEvent | `notification.requested` | OrderService Outbox | `notification-service.notification.requested` |
+| DeliveryRequestedEvent | `delivery.requested` | OrderService Outbox | `delivery-service.delivery.requested` |
+| DeliveryCompletedEvent | `delivery.completed` | DeliveryService | `order-service.delivery.completed` |
+
+### Exact next step to continue
+**Start with NotificationService** (simplest remaining service):
+1. Domain: `Notification` entity (id, user_id, order_id, message, type string, sent_at, created_at), no enum needed
+2. Application: `INotificationRepository`
+3. Infrastructure: `NotificationDbContext`, EF config, repository, `NotificationRequestedConsumer` (queue: `notification-service.notification.requested`), `DependencyInjection`
+4. API: `Program.cs`, `appsettings.json` (DB port 5438)
+5. EF migration
+
+**Then DeliveryService:**
+1. Domain: `Delivery` entity, `DeliveryStatus` enum (Pending/Assigned/InProgress/Delivered/Failed)
+2. Infrastructure: consumer for `delivery.requested` (queue: `delivery-service.delivery.requested`) AND `payment.completed` (queue: `delivery-service.payment.completed`)
+3. API: courier endpoints (assign, pickup, deliver) — publishes `DeliveryCompletedEvent`
+4. OrderService needs a `DeliveryCompletedConsumer` added to consume `delivery.completed` and call `order.MarkDelivered()`
+
+**Then RestaurantService GET endpoints** (needed for OrderService validation):
+- `GET /api/restaurants` — list all restaurants
+- `GET /api/restaurants/{id}` — return restaurant with MenuItems
+  Response must map to `OrderService.Application.DTOs.RestaurantDto`: `{Id, Name, Status(string), MenuItems:[{Id,Name,Price,IsAvailable}]}`
+
+**Then ApiGateway** (YARP — add `Yarp.ReverseProxy` to Directory.Packages.props + csproj, configure routes)
+
+**Then docker-compose.yml** (add 6 service containers)
