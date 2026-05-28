@@ -56,11 +56,8 @@ using (var scope = app.Services.CreateScope())
     scope.ServiceProvider.GetRequiredService<OrderDbContext>().Database.Migrate();
 }
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+app.UseSwagger();
+app.UseSwaggerUI();
 
 app.UseHttpsRedirection();
 app.UseAuthentication();
