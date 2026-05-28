@@ -31,6 +31,7 @@ public static class DependencyInjection
         services.AddHostedService<OutboxPublisherWorker>();
         services.AddHostedService<PaymentCompletedConsumer>();
         services.AddHostedService<PaymentFailedConsumer>();
+        services.AddHostedService<DeliveryCompletedConsumer>();
 
         return services;
     }

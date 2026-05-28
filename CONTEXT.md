@@ -284,7 +284,7 @@ Contains: OrderService and PaymentService demo implementations
 
 ---
 
-## Session Progress (2026-05-28)
+## Session Progress (2026-05-28, updated)
 
 Branch: `feature/implement-services`
 
@@ -332,25 +332,34 @@ All inherit `Contracts.Abstractions.IntegrationEvent`. All in namespace `Contrac
 | DeliveryRequestedEvent | `delivery.requested` | OrderService Outbox | `delivery-service.delivery.requested` |
 | DeliveryCompletedEvent | `delivery.completed` | DeliveryService | `order-service.delivery.completed` |
 
+**NotificationService** — complete (all 4 layers + EF migration):
+- Domain: `Notification` entity (id, user_id, order_id, message, type, sent_at, created_at)
+- Application: `INotificationRepository`
+- Infrastructure: `NotificationDbContext`, `NotificationConfiguration`, `ProcessedEventConfiguration`, `NotificationRepository`, `NotificationRequestedConsumer` (queue: `notification-service.notification.requested`), `DependencyInjection`
+- API: `Program.cs` (event-driven only, no controllers), `appsettings.json` (DB port 5438)
+- Migration: tables: notifications, processed_events
+
+**DeliveryService** — complete (all 4 layers + EF migration):
+- Domain: `Delivery` entity, `DeliveryStatus` enum (Pending/Assigned/InProgress/Delivered/Failed)
+- Application: `IDeliveryRepository` (GetByIdAsync, GetByOrderIdAsync, AddAsync, SaveChangesAsync)
+- Infrastructure: `DeliveryDbContext`, `DeliveryConfiguration`, `ProcessedEventConfiguration`, `DeliveryRepository`, `DeliveryRequestedConsumer` (queue: `delivery-service.delivery.requested`), `PaymentCompletedConsumer` (queue: `delivery-service.payment.completed`, idempotent — skips if delivery for OrderId already exists), `DependencyInjection`
+- API: `DeliveriesController` (GET /{id}, PATCH /{id}/assign [Courier], PATCH /{id}/pickup [Courier], PATCH /{id}/deliver [Courier] — publishes DeliveryCompletedEvent directly via IEventBus), `Program.cs`, `appsettings.json` (DB port 5440)
+- Migration: tables: deliveries, processed_events
+
+**OrderService** — `DeliveryCompletedConsumer` added (queue: `order-service.delivery.completed`, calls `order.MarkDelivered()`). Registered in DependencyInjection.
+
+### csproj fixes applied
+- Both new Domain csproj files needed explicit `Shared` ProjectReference
+- Both new Infrastructure csproj files needed `Microsoft.Extensions.Hosting.Abstractions` and `RabbitMQ.Client` (matching PaymentService.Infrastructure pattern)
+- Both new API csproj files needed `Microsoft.EntityFrameworkCore.Design` (matching PaymentService.API pattern, required for `dotnet ef migrations`)
+
 ### Exact next step to continue
-**Start with NotificationService** (simplest remaining service):
-1. Domain: `Notification` entity (id, user_id, order_id, message, type string, sent_at, created_at), no enum needed
-2. Application: `INotificationRepository`
-3. Infrastructure: `NotificationDbContext`, EF config, repository, `NotificationRequestedConsumer` (queue: `notification-service.notification.requested`), `DependencyInjection`
-4. API: `Program.cs`, `appsettings.json` (DB port 5438)
-5. EF migration
-
-**Then DeliveryService:**
-1. Domain: `Delivery` entity, `DeliveryStatus` enum (Pending/Assigned/InProgress/Delivered/Failed)
-2. Infrastructure: consumer for `delivery.requested` (queue: `delivery-service.delivery.requested`) AND `payment.completed` (queue: `delivery-service.payment.completed`)
-3. API: courier endpoints (assign, pickup, deliver) — publishes `DeliveryCompletedEvent`
-4. OrderService needs a `DeliveryCompletedConsumer` added to consume `delivery.completed` and call `order.MarkDelivered()`
-
-**Then RestaurantService GET endpoints** (needed for OrderService validation):
+**RestaurantService GET endpoints** (needed for OrderService validation):
 - `GET /api/restaurants` — list all restaurants
 - `GET /api/restaurants/{id}` — return restaurant with MenuItems
   Response must map to `OrderService.Application.DTOs.RestaurantDto`: `{Id, Name, Status(string), MenuItems:[{Id,Name,Price,IsAvailable}]}`
+  Read existing RestaurantService code first before touching anything.
 
-**Then ApiGateway** (YARP — add `Yarp.ReverseProxy` to Directory.Packages.props + csproj, configure routes)
+**Then ApiGateway** (YARP — add `Yarp.ReverseProxy` to Directory.Packages.props + csproj, configure routes for all services)
 
-**Then docker-compose.yml** (add 6 service containers)
+**Then docker-compose.yml** (add all service containers + postgres DBs + RabbitMQ)
