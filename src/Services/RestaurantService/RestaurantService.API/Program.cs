@@ -1,6 +1,8 @@
 using Auth;
 using Auth.Jwt;
 using FluentValidation;
+using Microsoft.EntityFrameworkCore;
+using RestaurantService.Infrastructure.Persistence;
 using FluentValidation.AspNetCore;
 using Microsoft.OpenApi.Models;
 using RestaurantService.Application.Validators;
@@ -67,6 +69,11 @@ builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthServices();
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    scope.ServiceProvider.GetRequiredService<RestaurantDbContext>().Database.Migrate();
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

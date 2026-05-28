@@ -1,5 +1,7 @@
 using Auth.Jwt;
 using DeliveryService.Infrastructure.Extensions;
+using DeliveryService.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -40,6 +42,11 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddJwtAuthentication(builder.Configuration);
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    scope.ServiceProvider.GetRequiredService<DeliveryDbContext>().Database.Migrate();
+}
 
 if (app.Environment.IsDevelopment())
 {

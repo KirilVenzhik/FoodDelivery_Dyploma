@@ -13,6 +13,8 @@ volumes:
 
 services:
 
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+
   rabbitmq:
     image: rabbitmq:3-management
     container_name: rabbitmq
@@ -27,6 +29,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
   seq:
     image: datalust/seq
@@ -54,21 +57,12 @@ services:
       - "5433:5432"
     volumes:
       - auth-db-data:/var/lib/postgresql/data
-
-  order-db:
-    image: postgres:16
-    container_name: order-db
-    hostname: order-db
-    networks:
-      - food-delivery-network
-    environment:
-      POSTGRES_DB: order_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5434:5432"
-    volumes:
-      - order-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d auth_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   restaurant-db:
     image: postgres:16
@@ -84,6 +78,33 @@ services:
       - "5435:5432"
     volumes:
       - restaurant-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d restaurant_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  order-db:
+    image: postgres:16
+    container_name: order-db
+    hostname: order-db
+    networks:
+      - food-delivery-network
+    environment:
+      POSTGRES_DB: order_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - order-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d order_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   payment-db:
     image: postgres:16
@@ -99,6 +120,12 @@ services:
       - "5436:5432"
     volumes:
       - payment-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d payment_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   delivery-db:
     image: postgres:16
@@ -114,6 +141,12 @@ services:
       - "5437:5432"
     volumes:
       - delivery-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d delivery_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   notification-db:
     image: postgres:16
@@ -129,3 +162,198 @@ services:
       - "5438:5432"
     volumes:
       - notification-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d notification_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Services ─────────────────────────────────────────────────────────────────
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: src/Services/AuthService/Dockerfile
+    container_name: auth-service
+    hostname: auth-service
+    networks:
+      - food-delivery-network
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Database: "Host=auth-db;Port=5432;Database=auth_db;Username=postgres;Password=postgres"
+      Jwt__Issuer: food-delivery
+      Jwt__Audience: food-delivery
+      Jwt__SecretKey: SUPER_SECRET_DEVELOPMENT_KEY_123456789
+      Jwt__ExpirationMinutes: "60"
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: guest
+      RabbitMq__Password: guest
+      RabbitMq__ExchangeName: food-delivery.events
+    ports:
+      - "5262:8080"
+    depends_on:
+      auth-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  restaurant-service:
+    build:
+      context: .
+      dockerfile: src/Services/RestaurantService/Dockerfile
+    container_name: restaurant-service
+    hostname: restaurant-service
+    networks:
+      - food-delivery-network
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Database: "Host=restaurant-db;Port=5432;Database=restaurant_db;Username=postgres;Password=postgres"
+      Jwt__Issuer: food-delivery
+      Jwt__Audience: food-delivery
+      Jwt__SecretKey: SUPER_SECRET_DEVELOPMENT_KEY_123456789
+      Jwt__ExpirationMinutes: "60"
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: guest
+      RabbitMq__Password: guest
+      RabbitMq__ExchangeName: food-delivery.events
+    ports:
+      - "5265:8080"
+    depends_on:
+      restaurant-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  order-service:
+    build:
+      context: .
+      dockerfile: src/Services/OrderService/Dockerfile
+    container_name: order-service
+    hostname: order-service
+    networks:
+      - food-delivery-network
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Database: "Host=order-db;Port=5432;Database=order_db;Username=postgres;Password=postgres"
+      Jwt__Issuer: food-delivery
+      Jwt__Audience: food-delivery
+      Jwt__SecretKey: SUPER_SECRET_DEVELOPMENT_KEY_123456789
+      Jwt__ExpirationMinutes: "60"
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: guest
+      RabbitMq__Password: guest
+      RabbitMq__ExchangeName: food-delivery.events
+      RestaurantService__BaseUrl: http://restaurant-service:8080
+    ports:
+      - "5223:8080"
+    depends_on:
+      order-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: src/Services/PaymentService/Dockerfile
+    container_name: payment-service
+    hostname: payment-service
+    networks:
+      - food-delivery-network
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Database: "Host=payment-db;Port=5432;Database=payment_db;Username=postgres;Password=postgres"
+      Jwt__Issuer: food-delivery
+      Jwt__Audience: food-delivery
+      Jwt__SecretKey: SUPER_SECRET_DEVELOPMENT_KEY_123456789
+      Jwt__ExpirationMinutes: "60"
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: guest
+      RabbitMq__Password: guest
+      RabbitMq__ExchangeName: food-delivery.events
+    ports:
+      - "5045:8080"
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: src/Services/NotificationService/Dockerfile
+    container_name: notification-service
+    hostname: notification-service
+    networks:
+      - food-delivery-network
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Database: "Host=notification-db;Port=5432;Database=notification_db;Username=postgres;Password=postgres"
+      Jwt__Issuer: food-delivery
+      Jwt__Audience: food-delivery
+      Jwt__SecretKey: SUPER_SECRET_DEVELOPMENT_KEY_123456789
+      Jwt__ExpirationMinutes: "60"
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: guest
+      RabbitMq__Password: guest
+      RabbitMq__ExchangeName: food-delivery.events
+    ports:
+      - "5042:8080"
+    depends_on:
+      notification-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  delivery-service:
+    build:
+      context: .
+      dockerfile: src/Services/DeliveryService/Dockerfile
+    container_name: delivery-service
+    hostname: delivery-service
+    networks:
+      - food-delivery-network
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Database: "Host=delivery-db;Port=5432;Database=delivery_db;Username=postgres;Password=postgres"
+      Jwt__Issuer: food-delivery
+      Jwt__Audience: food-delivery
+      Jwt__SecretKey: SUPER_SECRET_DEVELOPMENT_KEY_123456789
+      Jwt__ExpirationMinutes: "60"
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: guest
+      RabbitMq__Password: guest
+      RabbitMq__ExchangeName: food-delivery.events
+    ports:
+      - "5085:8080"
+    depends_on:
+      delivery-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # ── API Gateway ───────────────────────────────────────────────────────────────
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: src/ApiGateway/Dockerfile
+    container_name: api-gateway
+    hostname: api-gateway
+    networks:
+      - food-delivery-network
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ReverseProxy__Clusters__auth_cluster__Destinations__auth_destination__Address: http://auth-service:8080
+      ReverseProxy__Clusters__restaurant_cluster__Destinations__restaurant_destination__Address: http://restaurant-service:8080
+      ReverseProxy__Clusters__order_cluster__Destinations__order_destination__Address: http://order-service:8080
+      ReverseProxy__Clusters__delivery_cluster__Destinations__delivery_destination__Address: http://delivery-service:8080
+    ports:
+      - "5036:8080"
+    depends_on:
+      - auth-service
+      - restaurant-service
+      - order-service
+      - delivery-service

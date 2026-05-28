@@ -1,6 +1,8 @@
 using Auth;
 using Auth.Jwt;
 using AuthService.Application.Validators;
+using AuthService.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using AuthService.Infrastructure.Extensions;
 using FluentValidation;
 using FluentValidation.AspNetCore;
@@ -70,6 +72,11 @@ builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthServices();
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.Migrate();
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

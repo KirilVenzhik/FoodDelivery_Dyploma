@@ -1,6 +1,8 @@
 using Auth.Jwt;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using PaymentService.Infrastructure.Extensions;
+using PaymentService.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,6 +42,11 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddJwtAuthentication(builder.Configuration);
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    scope.ServiceProvider.GetRequiredService<PaymentDbContext>().Database.Migrate();
+}
 
 if (app.Environment.IsDevelopment())
 {

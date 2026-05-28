@@ -2,9 +2,11 @@ using Auth;
 using Auth.Jwt;
 using FluentValidation;
 using FluentValidation.AspNetCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using OrderService.Application.Validators;
 using OrderService.Infrastructure.Extensions;
+using OrderService.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -48,6 +50,11 @@ builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthServices();
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    scope.ServiceProvider.GetRequiredService<OrderDbContext>().Database.Migrate();
+}
 
 if (app.Environment.IsDevelopment())
 {
