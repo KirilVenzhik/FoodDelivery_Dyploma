@@ -90,16 +90,8 @@ public class PaymentCompletedConsumer : BackgroundService
                         UserId = order.ClientId,
                         OrderId = order.Id,
                         Message = "Payment successful. Your order is being prepared.",
-                        NotificationType = "PaymentCompleted"
+                        NotificationType = "PaymentSuccess"
                     }, "notification.requested");
-
-                    await outbox.SaveMessageAsync(new DeliveryRequestedEvent
-                    {
-                        CorrelationId = evt.CorrelationId,
-                        OrderId = order.Id,
-                        ClientId = order.ClientId,
-                        RestaurantId = order.RestaurantId
-                    }, "delivery.requested");
                 }
 
                 db.ProcessedEvents.Add(new ProcessedEvent { EventId = evt.Id, ProcessedAt = DateTime.UtcNow });

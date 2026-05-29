@@ -359,9 +359,15 @@ services:
     ports:
       - "5000:8080"
     depends_on:
-      - auth-service
-      - restaurant-service
-      - order-service
-      - payment-service
-      - notification-service
-      - delivery-service
+      auth-service:
+        condition: service_started
+      restaurant-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+      delivery-service:
+        condition: service_started

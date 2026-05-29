@@ -61,7 +61,7 @@ public class RestaurantsController : ControllerBase
         return Ok(result);
     }
 
-    [Authorize(Roles = "RestaurantManager")]
+    [Authorize(Roles = "RestaurantOwner")]
     [HttpGet("my")]
     public async Task<IActionResult> GetMy(CancellationToken cancellationToken)
     {
@@ -70,7 +70,7 @@ public class RestaurantsController : ControllerBase
         return Ok(result);
     }
 
-    [Authorize(Roles = "RestaurantManager")]
+    [Authorize(Roles = "RestaurantOwner")]
     [HttpPost]
     public async Task<IActionResult> Create(
         CreateRestaurantRequest request,
@@ -87,7 +87,7 @@ public class RestaurantsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
 
-    [Authorize(Roles = "RestaurantManager")]
+    [Authorize(Roles = "RestaurantOwner")]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(
         Guid id,
@@ -106,7 +106,7 @@ public class RestaurantsController : ControllerBase
         return Ok(result);
     }
 
-    [Authorize(Roles = "RestaurantManager")]
+    [Authorize(Roles = "RestaurantOwner")]
     [HttpPost("{id:guid}/open")]
     public async Task<IActionResult> Open(Guid id, CancellationToken cancellationToken)
     {
@@ -116,7 +116,7 @@ public class RestaurantsController : ControllerBase
         return Ok(result);
     }
 
-    [Authorize(Roles = "RestaurantManager")]
+    [Authorize(Roles = "RestaurantOwner")]
     [HttpPost("{id:guid}/close")]
     public async Task<IActionResult> Close(Guid id, CancellationToken cancellationToken)
     {
@@ -126,7 +126,7 @@ public class RestaurantsController : ControllerBase
         return Ok(result);
     }
 
-    [Authorize(Roles = "RestaurantManager")]
+    [Authorize(Roles = "RestaurantOwner")]
     [HttpPost("{id:guid}/menu-items")]
     public async Task<IActionResult> AddMenuItem(
         Guid id,
@@ -145,7 +145,7 @@ public class RestaurantsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id }, result);
     }
 
-    [Authorize(Roles = "RestaurantManager")]
+    [Authorize(Roles = "RestaurantOwner")]
     [HttpPut("{id:guid}/menu-items/{itemId:guid}")]
     public async Task<IActionResult> UpdateMenuItem(
         Guid id,
@@ -167,7 +167,7 @@ public class RestaurantsController : ControllerBase
         return Ok(result);
     }
 
-    [Authorize(Roles = "RestaurantManager")]
+    [Authorize(Roles = "RestaurantOwner")]
     [HttpDelete("{id:guid}/menu-items/{itemId:guid}")]
     public async Task<IActionResult> RemoveMenuItem(
         Guid id,

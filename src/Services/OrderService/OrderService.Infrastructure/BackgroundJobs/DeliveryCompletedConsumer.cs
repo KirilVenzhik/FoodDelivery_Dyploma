@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OrderService.Application.Interfaces;
 using OrderService.Domain.Enums;
 using OrderService.Infrastructure.Persistence;
 using RabbitMQ.Client;
@@ -79,7 +80,21 @@ public class DeliveryCompletedConsumer : BackgroundService
                 var order = await db.Orders.FirstOrDefaultAsync(o => o.Id == evt.OrderId);
 
                 if (order is not null)
+                {
+                    if (order.Status == OrderStatus.ReadyForDelivery)
+                        order.ChangeStatus(OrderStatus.InDelivery);
                     order.ChangeStatus(OrderStatus.Delivered);
+
+                    var outbox = scope.ServiceProvider.GetRequiredService<IOutboxService>();
+                    await outbox.SaveMessageAsync(new NotificationRequestedEvent
+                    {
+                        CorrelationId = evt.CorrelationId,
+                        UserId = order.ClientId,
+                        OrderId = order.Id,
+                        Message = "Your order has been delivered.",
+                        NotificationType = "OrderDelivered"
+                    }, "notification.requested");
+                }
 
                 db.ProcessedEvents.Add(new ProcessedEvent { EventId = evt.Id, ProcessedAt = DateTime.UtcNow });
                 await db.SaveChangesAsync();

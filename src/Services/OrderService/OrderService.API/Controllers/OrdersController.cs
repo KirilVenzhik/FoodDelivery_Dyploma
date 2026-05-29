@@ -67,7 +67,7 @@ public class OrdersController : ControllerBase
     }
 
     [HttpPatch("{id:guid}/status")]
-    [Authorize(Roles = "RestaurantManager")]
+    [Authorize(Roles = "RestaurantOwner")]
     public async Task<IActionResult> ChangeStatus(
         Guid id,
         UpdateOrderStatusRequest request,

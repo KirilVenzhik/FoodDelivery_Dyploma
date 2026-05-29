@@ -69,6 +69,18 @@ public sealed class PlaceOrderCommandHandler
             "payment.requested",
             ct);
 
+        await _outboxService.SaveMessageAsync(
+            new NotificationRequestedEvent
+            {
+                CorrelationId = order.CorrelationId,
+                UserId = order.ClientId,
+                OrderId = order.Id,
+                Message = "Your order has been placed.",
+                NotificationType = "OrderPlaced"
+            },
+            "notification.requested",
+            ct);
+
         await _repository.SaveChangesAsync(ct);
 
         return OrderMapper.MapToResponse(order);

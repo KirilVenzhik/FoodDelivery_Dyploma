@@ -80,11 +80,6 @@ public class OutboxPublisherWorker : BackgroundService
                 await _eventBus.PublishAsync(notificationRequested, "notification.requested", ct);
                 break;
 
-            case nameof(DeliveryRequestedEvent):
-                var deliveryRequested = JsonSerializer.Deserialize<DeliveryRequestedEvent>(message.Payload)!;
-                await _eventBus.PublishAsync(deliveryRequested, "delivery.requested", ct);
-                break;
-
             default:
                 _logger.LogWarning("[Outbox] Unknown message type: {Type}", message.Type);
                 break;
