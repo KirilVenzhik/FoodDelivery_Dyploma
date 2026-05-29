@@ -1,6 +1,7 @@
-using DeliveryService.Application.Common;
+using DeliveryService.Application.DTOs;
 using DeliveryService.Application.Interfaces;
 using DeliveryService.Domain.Enums;
+using DeliveryService.Domain.Exceptions;
 
 namespace DeliveryService.Application.Commands;
 
@@ -13,18 +14,16 @@ public sealed class AssignDeliveryCommandHandler
     public AssignDeliveryCommandHandler(IDeliveryRepository repository)
         => _repository = repository;
 
-    public async Task<CommandResult> HandleAsync(AssignDeliveryCommand command, CancellationToken ct = default)
+    public async Task<DeliveryResponse> HandleAsync(AssignDeliveryCommand command, CancellationToken ct = default)
     {
-        var delivery = await _repository.GetByIdAsync(command.DeliveryId, ct);
-        if (delivery is null)
-            return CommandResult.NotFound();
+        var delivery = await _repository.GetByIdAsync(command.DeliveryId, ct)
+            ?? throw new DeliveryNotFoundException(command.DeliveryId);
 
         if (delivery.Status != DeliveryStatus.Pending)
-            return CommandResult.UnprocessableEntity("Delivery is not in Pending status.");
+            throw new DeliveryAlreadyAssignedException(command.DeliveryId);
 
         delivery.Assign(command.CourierId);
         await _repository.SaveChangesAsync(ct);
-
-        return CommandResult.Success();
+        return DeliveryResponse.FromDomain(delivery);
     }
 }

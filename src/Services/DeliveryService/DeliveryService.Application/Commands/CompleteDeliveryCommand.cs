@@ -1,7 +1,7 @@
 using Contracts.Events;
-using DeliveryService.Application.Common;
+using DeliveryService.Application.DTOs;
 using DeliveryService.Application.Interfaces;
-using DeliveryService.Domain.Enums;
+using DeliveryService.Domain.Exceptions;
 using EventBus.Abstractions;
 
 namespace DeliveryService.Application.Commands;
@@ -19,30 +19,28 @@ public sealed class CompleteDeliveryCommandHandler
         _eventBus = eventBus;
     }
 
-    public async Task<CommandResult> HandleAsync(CompleteDeliveryCommand command, CancellationToken ct = default)
+    public async Task<DeliveryResponse> HandleAsync(CompleteDeliveryCommand command, CancellationToken ct = default)
     {
-        var delivery = await _repository.GetByIdAsync(command.DeliveryId, ct);
-        if (delivery is null)
-            return CommandResult.NotFound();
+        var delivery = await _repository.GetByIdAsync(command.DeliveryId, ct)
+            ?? throw new DeliveryNotFoundException(command.DeliveryId);
 
         if (delivery.CourierId != command.CourierId)
-            return CommandResult.Forbidden();
-
-        if (delivery.Status != DeliveryStatus.InProgress)
-            return CommandResult.UnprocessableEntity("Delivery is not in InProgress status.");
+            throw new UnauthorizedAccessException("Only the assigned courier can complete this delivery.");
 
         delivery.Complete();
-        await _repository.SaveChangesAsync(ct);
 
         await _eventBus.PublishAsync(
             new DeliveryCompletedEvent
             {
                 OrderId = delivery.OrderId,
-                DeliveryId = delivery.Id
+                DeliveryId = delivery.Id,
+                CorrelationId = delivery.CorrelationId,
+                CourierId = delivery.CourierId!.Value
             },
             "delivery.completed",
             ct);
 
-        return CommandResult.Success();
+        await _repository.SaveChangesAsync(ct);
+        return DeliveryResponse.FromDomain(delivery);
     }
 }

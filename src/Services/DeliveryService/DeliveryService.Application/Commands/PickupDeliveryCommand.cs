@@ -1,33 +1,28 @@
-using DeliveryService.Application.Common;
+using DeliveryService.Application.DTOs;
 using DeliveryService.Application.Interfaces;
-using DeliveryService.Domain.Enums;
+using DeliveryService.Domain.Exceptions;
 
 namespace DeliveryService.Application.Commands;
 
-public record PickupDeliveryCommand(Guid DeliveryId, Guid CourierId);
+public record PickUpDeliveryCommand(Guid DeliveryId, Guid CourierId);
 
-public sealed class PickupDeliveryCommandHandler
+public sealed class PickUpDeliveryCommandHandler
 {
     private readonly IDeliveryRepository _repository;
 
-    public PickupDeliveryCommandHandler(IDeliveryRepository repository)
+    public PickUpDeliveryCommandHandler(IDeliveryRepository repository)
         => _repository = repository;
 
-    public async Task<CommandResult> HandleAsync(PickupDeliveryCommand command, CancellationToken ct = default)
+    public async Task<DeliveryResponse> HandleAsync(PickUpDeliveryCommand command, CancellationToken ct = default)
     {
-        var delivery = await _repository.GetByIdAsync(command.DeliveryId, ct);
-        if (delivery is null)
-            return CommandResult.NotFound();
+        var delivery = await _repository.GetByIdAsync(command.DeliveryId, ct)
+            ?? throw new DeliveryNotFoundException(command.DeliveryId);
 
         if (delivery.CourierId != command.CourierId)
-            return CommandResult.Forbidden();
+            throw new UnauthorizedAccessException("Only the assigned courier can pick up this delivery.");
 
-        if (delivery.Status != DeliveryStatus.Assigned)
-            return CommandResult.UnprocessableEntity("Delivery is not in Assigned status.");
-
-        delivery.Pickup();
+        delivery.PickUp();
         await _repository.SaveChangesAsync(ct);
-
-        return CommandResult.Success();
+        return DeliveryResponse.FromDomain(delivery);
     }
 }

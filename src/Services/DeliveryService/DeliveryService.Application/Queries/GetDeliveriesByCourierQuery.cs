@@ -3,18 +3,16 @@ using DeliveryService.Application.Interfaces;
 
 namespace DeliveryService.Application.Queries;
 
-public record GetDeliveriesByCourierQuery(Guid CourierId);
+public record GetMyDeliveriesQuery(Guid CourierId);
 
-public sealed class GetDeliveriesByCourierQueryHandler
+public sealed class GetMyDeliveriesQueryHandler
 {
     private readonly IDeliveryRepository _repository;
 
-    public GetDeliveriesByCourierQueryHandler(IDeliveryRepository repository)
+    public GetMyDeliveriesQueryHandler(IDeliveryRepository repository)
         => _repository = repository;
 
-    public async Task<List<DeliveryResponse>> HandleAsync(
-        GetDeliveriesByCourierQuery query,
-        CancellationToken ct = default)
+    public async Task<List<DeliveryResponse>> HandleAsync(GetMyDeliveriesQuery query, CancellationToken ct = default)
     {
         var deliveries = await _repository.GetByCourierIdAsync(query.CourierId, ct);
         return deliveries.Select(DeliveryResponse.FromDomain).ToList();
