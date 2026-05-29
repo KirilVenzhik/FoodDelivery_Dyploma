@@ -592,3 +592,166 @@ The service was previously functional but contained business logic directly in t
 ### Final state
 - `dotnet build` — 0 errors, 0 warnings
 - `dotnet test tests/AuthService.Tests` — 26/26 passed
+
+---
+
+## Session Progress (2026-05-29, OrderService production polish)
+
+Branch: `master` (commit `add7cca`)
+
+### Goal
+Polish OrderService to production quality. Previous implementation was functional
+but used a fat-Result-pattern (handlers returning `CommandResult` with status codes
+switched in the controller), had no domain events, no typed exceptions, no unit tests,
+and all business logic lived in the controller or handler rather than the domain.
+
+### Changes — Domain Layer (`OrderService.Domain`)
+
+**`OrderStatus` enum:** added `Cancelled = 7`.
+
+**New: `Events/` folder (4 files):**
+- `OrderCreatedDomainEvent` — OrderId, ClientId, RestaurantId, TotalAmount; raised in `Order.Create()`
+- `OrderPaidDomainEvent` — OrderId, ClientId; raised in `Order.CompletePayment()`
+- `OrderPaymentFailedDomainEvent` — OrderId, ClientId, Reason; raised in `Order.FailPayment()`
+- `OrderStatusChangedDomainEvent` — OrderId, OldStatus, NewStatus; raised in `Order.ChangeStatus()`
+All inherit `Shared.Primitives.DomainEvent`.
+
+**`Exceptions/` folder** — `OrderDomainException` unsealed; 4 new specific types added:
+- `InvalidOrderStatusTransitionException : OrderDomainException` — two constructors: (from, to enums) and (free message)
+- `OrderItemsEmptyException : OrderDomainException` — thrown by `Order.Create()` when no items
+- `OrderNotFoundException : Exception` — thrown by query/command handlers on missing order
+- `RestaurantValidationException : Exception` — thrown by `PlaceOrderCommandHandler` on invalid restaurant/item
+
+**`OrderItem` entity:** added `UpdateQuantity(int newQuantity)` — validates > 0, recalculates `LineTotal`.
+
+**`Order` aggregate — complete rewrite:**
+- `Create(clientId, restaurantId, items, correlationId)` — now accepts `correlationId` param;
+  throws `OrderItemsEmptyException` if items empty; raises `OrderCreatedDomainEvent`
+- `RequestPayment()` → `StartPayment()` — validates `Status == PendingPayment`, throws `InvalidOrderStatusTransitionException` if not
+- `MarkPaymentCompleted()` → `CompletePayment()` — raises `OrderPaidDomainEvent`
+- `MarkPaymentFailed()` → `FailPayment(string reason)` — passes reason to domain event; raises `OrderPaymentFailedDomainEvent`
+- Individual transition methods (`StartPreparation`, `MarkReadyForDelivery`, `MarkInDelivery`, `MarkDelivered`) **removed**
+- New: `ChangeStatus(OrderStatus newStatus)` — static `AllowedTransitions` dictionary (Paid→InPreparation, InPreparation→ReadyForDelivery, ReadyForDelivery→InDelivery, InDelivery→Delivered);
+  throws `InvalidOrderStatusTransitionException` for any other pair; raises `OrderStatusChangedDomainEvent`
+
+### Changes — Application Layer (`OrderService.Application`)
+
+**`IOrderRepository`:** removed `AddOutboxMessageAsync` — outbox is now `IOutboxService`'s responsibility.
+
+**`IRestaurantServiceClient`:** `GetRestaurantAsync` → `GetRestaurantWithItemsAsync`.
+
+**New: `Interfaces/IOutboxService.cs`:**
+`SaveMessageAsync<T>(T integrationEvent, string routingKey, CancellationToken ct)` where `T : IIntegrationEvent`.
+Routing key is a first-class parameter; implementation stores in the same DbContext transaction.
+
+**`DTOs/RestaurantDto.cs`:** added `bool IsActive => Status == "Open"` computed property
+(JSON deserialization from RestaurantService still uses `Status` string; handler code uses `IsActive`).
+
+**New: `Mapping/OrderMapper.cs`:** internal static `MapToResponse(Order)` — shared by all handlers, eliminates duplication.
+
+**`Commands/PlaceOrderCommand.cs`:** handler refactored:
+- Constructor adds `IOutboxService` dependency
+- Returns `Task<OrderResponse>` (was `Task<CommandResult>`)
+- Throws `RestaurantValidationException` on bad restaurant/item (was returning error CommandResult)
+- Generates `correlationId = Guid.NewGuid()` before `Order.Create()`
+- Calls `order.StartPayment()` (was `order.RequestPayment()`)
+- Saves outbox via `IOutboxService.SaveMessageAsync(paymentRequestedEvent, "payment.requested")` — same DbContext, one `SaveChangesAsync()` covers both
+
+**New: `Commands/ChangeOrderStatusCommand.cs`:** replaces `UpdateOrderStatusCommand`:
+- Parses `NewStatus` string to `OrderStatus` enum; throws `InvalidOrderStatusTransitionException` for unrecognised strings
+- Calls `order.ChangeStatus(newStatus)` — domain validates the transition
+- Returns `Task<OrderResponse>`
+
+**Deleted:** `Commands/UpdateOrderStatusCommand.cs`, `Common/CommandResult.cs`, `Common/QueryResult.cs` — all unused after exception-based architecture.
+
+**`Queries/GetOrderByIdQuery.cs`:** returns `Task<OrderResponse>`; throws `OrderNotFoundException` / `UnauthorizedAccessException` instead of returning `QueryResult`.
+
+**`Queries/GetOrdersByClientQuery.cs`:** updated to use `OrderMapper`.
+
+### Changes — Infrastructure Layer (`OrderService.Infrastructure`)
+
+**New: `Services/OutboxService.cs`:** implements `IOutboxService`.
+Serializes event with `JsonSerializer.Serialize`, sets `Type = typeof(T).Name`, adds to `OrderDbContext.OutboxMessages`.
+Returns `Task.CompletedTask` (ChangeTracker add is synchronous); caller's `SaveChangesAsync()` persists it.
+
+**`Messaging/RestaurantServiceHttpClient.cs`:** `GetRestaurantAsync` → `GetRestaurantWithItemsAsync`;
+wrapped in `try/catch HttpRequestException` to return `null` instead of throwing.
+
+**`BackgroundJobs/PaymentCompletedConsumer.cs`:**
+- `order.MarkPaymentCompleted()` → `order.CompletePayment()`
+- Direct `db.OutboxMessages.Add()` calls replaced with `IOutboxService` resolved from scope
+- `IOutboxService` is scoped → same `OrderDbContext` instance → one `db.SaveChangesAsync()` covers order + both outbox entries
+
+**`BackgroundJobs/PaymentFailedConsumer.cs`:**
+- `order.MarkPaymentFailed()` → `order.FailPayment(evt.Reason)` (passes reason through)
+- Same outbox refactor as above
+
+**`BackgroundJobs/DeliveryCompletedConsumer.cs`:**
+- `order.MarkDelivered()` → `order.ChangeStatus(OrderStatus.Delivered)` (domain validates InDelivery→Delivered)
+
+**`Repositories/OrderRepository.cs`:** removed `AddOutboxMessageAsync`.
+
+**`Extensions/DependencyInjection.cs`:**
+- Added `services.AddScoped<IOutboxService, OutboxService>()`
+- Replaced `UpdateOrderStatusCommandHandler` → `ChangeOrderStatusCommandHandler`
+
+### Changes — API Layer (`OrderService.API`)
+
+**New: `Middlewares/ExceptionHandlingMiddleware.cs`:**
+| Exception | HTTP Status |
+|---|---|
+| `OrderNotFoundException` | 404 Not Found |
+| `OrderItemsEmptyException` | 400 Bad Request |
+| `RestaurantValidationException` | 422 Unprocessable Entity |
+| `InvalidOrderStatusTransitionException` | 409 Conflict |
+| `ValidationException` (FluentValidation) | 400 + `errors` dict grouped by field |
+| `UnauthorizedAccessException` | 403 Forbidden |
+| Unhandled `Exception` | 500 Internal Server Error (logged at Error) |
+All responses: `application/json` with camelCase `{error}` or `{error, errors}` body.
+
+**`Controllers/OrdersController.cs`:**
+- Swapped `UpdateOrderStatusCommandHandler` → `ChangeOrderStatusCommandHandler`
+- `POST /api/orders` → `CreatedAtAction(nameof(GetById), ...)` returning **201 Created + OrderResponse** (was `Ok({orderId})`)
+- `GET /api/orders` — added `[Authorize(Roles = "Customer")]` (was missing)
+- `PATCH /api/orders/{id}/status` → `Ok(response)` returning **200 OK + OrderResponse** (was `NoContent()`)
+- All error-branch code removed — middleware handles everything
+
+**`Program.cs`:**
+- Added `builder.Services.AddCorrelation()`
+- Added `app.UseCorrelation()` + `app.UseMiddleware<ExceptionHandlingMiddleware>()` (before Swagger/auth)
+
+### Changes — Tests (`src/Services/OrderService/OrderService.Tests`)
+
+New project: `OrderService.Tests.csproj` — xUnit 2.9.2, Moq 4.20.72, FluentAssertions 6.12.0.
+Project added to `FoodDelivery.sln`.
+
+**`Domain/OrderAggregateTests.cs` (11 tests):**
+Create valid/empty, `OrderCreatedDomainEvent` fields, `StartPayment`, `CompletePayment` state + event,
+`FailPayment` state + event with reason, `ChangeStatus` valid transition, invalid transition exception, `OrderStatusChangedDomainEvent` old/new status.
+
+**`Domain/OrderItemTests.cs` (2 tests):**
+`Create` computes `LineTotal`; `UpdateQuantity` recalculates `LineTotal` and updates `Quantity`.
+
+**`Application/PlaceOrderCommandHandlerTests.cs` (4 tests):**
+Happy path verifies `AddAsync`, `SaveMessageAsync("payment.requested")`, `SaveChangesAsync` each once;
+restaurant null → `RestaurantValidationException`; item unavailable → `RestaurantValidationException`;
+empty items → `OrderItemsEmptyException` (bubbles from `Order.Create()`).
+
+**`Application/GetOrderByIdQueryHandlerTests.cs` (3 tests):**
+Existing order returns `OrderResponse`; unknown id → `OrderNotFoundException`;
+different ClientId + Customer role → `UnauthorizedAccessException`.
+
+**`Application/ChangeOrderStatusCommandHandlerTests.cs` (3 tests):**
+`Paid → InPreparation` updates status and returns response; order not found → `OrderNotFoundException`;
+`PendingPayment → InPreparation` (not in transition table) → `InvalidOrderStatusTransitionException`.
+
+### Final state
+- `dotnet build src/Services/OrderService/OrderService.API` — 0 errors, 0 warnings
+- `dotnet test src/Services/OrderService/OrderService.Tests` — **23/23 passed**
+- Committed: `add7cca`, pushed to `origin/master`
+
+### Architectural decisions made
+- **Exception-based error handling** — handlers throw typed domain exceptions; `ExceptionHandlingMiddleware` maps to HTTP. `CommandResult`/`QueryResult` pattern deleted entirely.
+- **`IOutboxService` as seam** — handler code is routing-key-aware; implementation stores by `typeof(T).Name` and `OutboxPublisherWorker` resolves routing via switch-case (avoids BuildingBlocks schema change that would require migrations on all 6 services).
+- **`correlationId` param in `Order.Create()`** — generated by handler before construction so it can be passed to `PaymentRequestedEvent` consistently.
+- **`RestaurantDto.IsActive` computed property** — keeps JSON deserialization from RestaurantService working (it sends `Status: "Open"`) while handler code reads the cleaner `IsActive` bool.
