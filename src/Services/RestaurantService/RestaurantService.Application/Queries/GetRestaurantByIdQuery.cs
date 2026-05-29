@@ -1,5 +1,6 @@
 using RestaurantService.Application.DTOs;
 using RestaurantService.Application.Interfaces;
+using RestaurantService.Domain.Exceptions;
 
 namespace RestaurantService.Application.Queries;
 
@@ -12,9 +13,13 @@ public sealed class GetRestaurantByIdQueryHandler
     public GetRestaurantByIdQueryHandler(IRestaurantRepository repository)
         => _repository = repository;
 
-    public async Task<RestaurantResponse?> HandleAsync(GetRestaurantByIdQuery query, CancellationToken ct = default)
+    public async Task<RestaurantResponse> HandleAsync(
+        GetRestaurantByIdQuery query,
+        CancellationToken ct = default)
     {
-        var restaurant = await _repository.GetByIdAsync(query.RestaurantId, ct);
-        return restaurant is null ? null : RestaurantResponse.FromDomain(restaurant);
+        var restaurant = await _repository.GetByIdWithItemsAsync(query.RestaurantId, ct)
+            ?? throw new RestaurantNotFoundException(query.RestaurantId);
+
+        return RestaurantResponse.FromDomain(restaurant);
     }
 }

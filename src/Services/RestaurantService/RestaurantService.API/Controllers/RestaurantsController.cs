@@ -2,7 +2,6 @@ using Auth.Abstractions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RestaurantService.Application.Commands;
-using RestaurantService.Application.Common;
 using RestaurantService.Application.DTOs;
 using RestaurantService.Application.Queries;
 
@@ -13,38 +12,62 @@ namespace RestaurantService.API.Controllers;
 public class RestaurantsController : ControllerBase
 {
     private readonly CreateRestaurantCommandHandler _createHandler;
+    private readonly UpdateRestaurantCommandHandler _updateHandler;
+    private readonly ChangeRestaurantAvailabilityCommandHandler _availabilityHandler;
     private readonly AddMenuItemCommandHandler _addMenuItemHandler;
     private readonly UpdateMenuItemCommandHandler _updateMenuItemHandler;
-    private readonly DeleteMenuItemCommandHandler _deleteMenuItemHandler;
-    private readonly OpenRestaurantCommandHandler _openHandler;
-    private readonly CloseRestaurantCommandHandler _closeHandler;
+    private readonly RemoveMenuItemCommandHandler _removeMenuItemHandler;
     private readonly GetAllRestaurantsQueryHandler _getAllHandler;
     private readonly GetRestaurantByIdQueryHandler _getByIdHandler;
-    private readonly GetMenuItemsQueryHandler _getMenuItemsHandler;
+    private readonly GetMyRestaurantsQueryHandler _getMyHandler;
     private readonly ICurrentUser _currentUser;
 
     public RestaurantsController(
         CreateRestaurantCommandHandler createHandler,
+        UpdateRestaurantCommandHandler updateHandler,
+        ChangeRestaurantAvailabilityCommandHandler availabilityHandler,
         AddMenuItemCommandHandler addMenuItemHandler,
         UpdateMenuItemCommandHandler updateMenuItemHandler,
-        DeleteMenuItemCommandHandler deleteMenuItemHandler,
-        OpenRestaurantCommandHandler openHandler,
-        CloseRestaurantCommandHandler closeHandler,
+        RemoveMenuItemCommandHandler removeMenuItemHandler,
         GetAllRestaurantsQueryHandler getAllHandler,
         GetRestaurantByIdQueryHandler getByIdHandler,
-        GetMenuItemsQueryHandler getMenuItemsHandler,
+        GetMyRestaurantsQueryHandler getMyHandler,
         ICurrentUser currentUser)
     {
         _createHandler = createHandler;
+        _updateHandler = updateHandler;
+        _availabilityHandler = availabilityHandler;
         _addMenuItemHandler = addMenuItemHandler;
         _updateMenuItemHandler = updateMenuItemHandler;
-        _deleteMenuItemHandler = deleteMenuItemHandler;
-        _openHandler = openHandler;
-        _closeHandler = closeHandler;
+        _removeMenuItemHandler = removeMenuItemHandler;
         _getAllHandler = getAllHandler;
         _getByIdHandler = getByIdHandler;
-        _getMenuItemsHandler = getMenuItemsHandler;
+        _getMyHandler = getMyHandler;
         _currentUser = currentUser;
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> GetAll(CancellationToken cancellationToken)
+    {
+        var result = await _getAllHandler.HandleAsync(new GetAllRestaurantsQuery(), cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await _getByIdHandler.HandleAsync(
+            new GetRestaurantByIdQuery(id), cancellationToken);
+        return Ok(result);
+    }
+
+    [Authorize(Roles = "RestaurantManager")]
+    [HttpGet("my")]
+    public async Task<IActionResult> GetMy(CancellationToken cancellationToken)
+    {
+        var result = await _getMyHandler.HandleAsync(
+            new GetMyRestaurantsQuery(_currentUser.UserId), cancellationToken);
+        return Ok(result);
     }
 
     [Authorize(Roles = "RestaurantManager")]
@@ -54,142 +77,107 @@ public class RestaurantsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _createHandler.HandleAsync(
-            new CreateRestaurantCommand(_currentUser.UserId, request.Name), cancellationToken);
+            new CreateRestaurantCommand(
+                _currentUser.UserId,
+                request.Name,
+                request.Description,
+                request.Address),
+            cancellationToken);
 
-        return result.Status switch
-        {
-            CommandResultStatus.Success => Ok(result.CreatedId),
-            CommandResultStatus.Conflict => Conflict("Restaurant already exists."),
-            _ => StatusCode(500)
-        };
+        return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
 
     [Authorize(Roles = "RestaurantManager")]
-    [HttpPost("{restaurantId:guid}/menu-items")]
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(
+        Guid id,
+        UpdateRestaurantRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _updateHandler.HandleAsync(
+            new UpdateRestaurantCommand(
+                id,
+                _currentUser.UserId,
+                request.Name,
+                request.Description,
+                request.Address),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    [Authorize(Roles = "RestaurantManager")]
+    [HttpPost("{id:guid}/open")]
+    public async Task<IActionResult> Open(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await _availabilityHandler.HandleAsync(
+            new ChangeRestaurantAvailabilityCommand(id, _currentUser.UserId, true),
+            cancellationToken);
+        return Ok(result);
+    }
+
+    [Authorize(Roles = "RestaurantManager")]
+    [HttpPost("{id:guid}/close")]
+    public async Task<IActionResult> Close(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await _availabilityHandler.HandleAsync(
+            new ChangeRestaurantAvailabilityCommand(id, _currentUser.UserId, false),
+            cancellationToken);
+        return Ok(result);
+    }
+
+    [Authorize(Roles = "RestaurantManager")]
+    [HttpPost("{id:guid}/menu-items")]
     public async Task<IActionResult> AddMenuItem(
-        Guid restaurantId,
+        Guid id,
         AddMenuItemRequest request,
         CancellationToken cancellationToken)
     {
         var result = await _addMenuItemHandler.HandleAsync(
-            new AddMenuItemCommand(restaurantId, _currentUser.UserId, request.Name, request.Price),
+            new AddMenuItemCommand(
+                id,
+                _currentUser.UserId,
+                request.Name,
+                request.Description,
+                request.Price),
             cancellationToken);
 
-        return result.Status switch
-        {
-            CommandResultStatus.Success => Ok(result.CreatedId),
-            CommandResultStatus.NotFound => NotFound(),
-            CommandResultStatus.Forbidden => Forbid(),
-            _ => StatusCode(500)
-        };
+        return CreatedAtAction(nameof(GetById), new { id }, result);
     }
 
     [Authorize(Roles = "RestaurantManager")]
-    [HttpPut("{restaurantId:guid}/menu-items/{menuItemId:guid}")]
+    [HttpPut("{id:guid}/menu-items/{itemId:guid}")]
     public async Task<IActionResult> UpdateMenuItem(
-        Guid restaurantId,
-        Guid menuItemId,
+        Guid id,
+        Guid itemId,
         UpdateMenuItemRequest request,
         CancellationToken cancellationToken)
     {
         var result = await _updateMenuItemHandler.HandleAsync(
-            new UpdateMenuItemCommand(restaurantId, menuItemId, _currentUser.UserId, request.Name, request.Price),
+            new UpdateMenuItemCommand(
+                id,
+                itemId,
+                _currentUser.UserId,
+                request.Name,
+                request.Description,
+                request.Price,
+                request.Available),
             cancellationToken);
 
-        return result.Status switch
-        {
-            CommandResultStatus.Success => NoContent(),
-            CommandResultStatus.NotFound => NotFound(),
-            CommandResultStatus.Forbidden => Forbid(),
-            _ => StatusCode(500)
-        };
+        return Ok(result);
     }
 
     [Authorize(Roles = "RestaurantManager")]
-    [HttpDelete("{restaurantId:guid}/menu-items/{menuItemId:guid}")]
-    public async Task<IActionResult> DeleteMenuItem(
-        Guid restaurantId,
-        Guid menuItemId,
+    [HttpDelete("{id:guid}/menu-items/{itemId:guid}")]
+    public async Task<IActionResult> RemoveMenuItem(
+        Guid id,
+        Guid itemId,
         CancellationToken cancellationToken)
     {
-        var result = await _deleteMenuItemHandler.HandleAsync(
-            new DeleteMenuItemCommand(restaurantId, menuItemId, _currentUser.UserId),
+        await _removeMenuItemHandler.HandleAsync(
+            new RemoveMenuItemCommand(id, itemId, _currentUser.UserId),
             cancellationToken);
 
-        return result.Status switch
-        {
-            CommandResultStatus.Success => NoContent(),
-            CommandResultStatus.NotFound => NotFound(),
-            CommandResultStatus.Forbidden => Forbid(),
-            _ => StatusCode(500)
-        };
-    }
-
-    [Authorize(Roles = "RestaurantManager")]
-    [HttpPost("{restaurantId:guid}/open")]
-    public async Task<IActionResult> Open(
-        Guid restaurantId,
-        CancellationToken cancellationToken)
-    {
-        var result = await _openHandler.HandleAsync(
-            new OpenRestaurantCommand(restaurantId, _currentUser.UserId), cancellationToken);
-
-        return result.Status switch
-        {
-            CommandResultStatus.Success => Ok(),
-            CommandResultStatus.NotFound => NotFound(),
-            CommandResultStatus.Forbidden => Forbid(),
-            _ => StatusCode(500)
-        };
-    }
-
-    [Authorize(Roles = "RestaurantManager")]
-    [HttpPost("{restaurantId:guid}/close")]
-    public async Task<IActionResult> Close(
-        Guid restaurantId,
-        CancellationToken cancellationToken)
-    {
-        var result = await _closeHandler.HandleAsync(
-            new CloseRestaurantCommand(restaurantId, _currentUser.UserId), cancellationToken);
-
-        return result.Status switch
-        {
-            CommandResultStatus.Success => Ok(),
-            CommandResultStatus.NotFound => NotFound(),
-            CommandResultStatus.Forbidden => Forbid(),
-            _ => StatusCode(500)
-        };
-    }
-
-    [Authorize]
-    [HttpGet]
-    public async Task<IActionResult> GetAll(CancellationToken cancellationToken)
-    {
-        var restaurants = await _getAllHandler.HandleAsync(cancellationToken);
-        return Ok(restaurants);
-    }
-
-    [Authorize]
-    [HttpGet("{restaurantId:guid}")]
-    public async Task<IActionResult> GetById(
-        Guid restaurantId,
-        CancellationToken cancellationToken)
-    {
-        var restaurant = await _getByIdHandler.HandleAsync(
-            new GetRestaurantByIdQuery(restaurantId), cancellationToken);
-
-        return restaurant is null ? NotFound() : Ok(restaurant);
-    }
-
-    [Authorize]
-    [HttpGet("{restaurantId:guid}/menu-items")]
-    public async Task<IActionResult> GetMenuItems(
-        Guid restaurantId,
-        CancellationToken cancellationToken)
-    {
-        var items = await _getMenuItemsHandler.HandleAsync(
-            new GetMenuItemsQuery(restaurantId), cancellationToken);
-
-        return items is null ? NotFound() : Ok(items);
+        return NoContent();
     }
 }

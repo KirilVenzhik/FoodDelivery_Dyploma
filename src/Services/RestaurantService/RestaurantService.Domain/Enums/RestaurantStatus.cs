@@ -2,6 +2,6 @@
 
 public enum RestaurantStatus
 {
-    Closed = 1,
-    Open = 2
+    Closed = 0,
+    Open = 1
 }

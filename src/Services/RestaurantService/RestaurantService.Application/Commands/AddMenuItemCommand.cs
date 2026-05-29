@@ -1,29 +1,45 @@
-using RestaurantService.Application.Common;
+using FluentValidation;
+using RestaurantService.Application.DTOs;
 using RestaurantService.Application.Interfaces;
+using RestaurantService.Domain.Exceptions;
 
 namespace RestaurantService.Application.Commands;
 
-public record AddMenuItemCommand(Guid RestaurantId, Guid OwnerId, string Name, decimal Price);
+public record AddMenuItemCommand(
+    Guid RestaurantId,
+    Guid RequestingOwnerId,
+    string Name,
+    string Description,
+    decimal Price);
 
 public sealed class AddMenuItemCommandHandler
 {
     private readonly IRestaurantRepository _repository;
+    private readonly IValidator<AddMenuItemCommand> _validator;
 
-    public AddMenuItemCommandHandler(IRestaurantRepository repository)
-        => _repository = repository;
-
-    public async Task<CommandResult> HandleAsync(AddMenuItemCommand command, CancellationToken ct = default)
+    public AddMenuItemCommandHandler(
+        IRestaurantRepository repository,
+        IValidator<AddMenuItemCommand> validator)
     {
-        var restaurant = await _repository.GetByIdAsync(command.RestaurantId, ct);
-        if (restaurant is null)
-            return CommandResult.NotFound();
+        _repository = repository;
+        _validator = validator;
+    }
 
-        if (restaurant.OwnerUserId != command.OwnerId)
-            return CommandResult.Forbidden();
+    public async Task<MenuItemResponse> HandleAsync(
+        AddMenuItemCommand command,
+        CancellationToken ct = default)
+    {
+        await _validator.ValidateAndThrowAsync(command, ct);
 
-        var item = restaurant.AddMenuItem(command.Name, command.Price);
+        var restaurant = await _repository.GetByIdWithItemsAsync(command.RestaurantId, ct)
+            ?? throw new RestaurantNotFoundException(command.RestaurantId);
+
+        if (restaurant.OwnerId != command.RequestingOwnerId)
+            throw new RestaurantOwnershipException(command.RestaurantId, command.RequestingOwnerId);
+
+        var menuItem = restaurant.AddMenuItem(command.Name, command.Description, command.Price);
         await _repository.SaveChangesAsync(ct);
 
-        return CommandResult.Success(item.Id);
+        return MenuItemResponse.FromDomain(menuItem);
     }
 }

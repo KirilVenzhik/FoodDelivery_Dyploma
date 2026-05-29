@@ -1,8 +1,8 @@
-﻿namespace RestaurantService.Application.DTOs;
+namespace RestaurantService.Application.DTOs;
 
 public sealed class AddMenuItemRequest
 {
     public string Name { get; set; } = default!;
-
+    public string Description { get; set; } = default!;
     public decimal Price { get; set; }
 }

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using RestaurantService.Application.Commands;
@@ -15,22 +15,21 @@ public static class DependencyInjection
     {
         services.AddDbContext<RestaurantDbContext>(options =>
         {
-            options.UseNpgsql(
-                configuration.GetConnectionString("Database"));
+            options.UseNpgsql(configuration.GetConnectionString("Database"));
         });
 
         services.AddScoped<IRestaurantRepository, RestaurantRepository>();
 
         services.AddScoped<CreateRestaurantCommandHandler>();
+        services.AddScoped<UpdateRestaurantCommandHandler>();
         services.AddScoped<AddMenuItemCommandHandler>();
         services.AddScoped<UpdateMenuItemCommandHandler>();
-        services.AddScoped<DeleteMenuItemCommandHandler>();
-        services.AddScoped<OpenRestaurantCommandHandler>();
-        services.AddScoped<CloseRestaurantCommandHandler>();
+        services.AddScoped<RemoveMenuItemCommandHandler>();
+        services.AddScoped<ChangeRestaurantAvailabilityCommandHandler>();
 
         services.AddScoped<GetAllRestaurantsQueryHandler>();
         services.AddScoped<GetRestaurantByIdQueryHandler>();
-        services.AddScoped<GetMenuItemsQueryHandler>();
+        services.AddScoped<GetMyRestaurantsQueryHandler>();
 
         return services;
     }

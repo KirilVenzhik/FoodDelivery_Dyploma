@@ -1,0 +1,23 @@
+using RestaurantService.Domain.Entities;
+
+namespace RestaurantService.Application.DTOs;
+
+public sealed class RestaurantSummaryResponse
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = default!;
+    public string Description { get; set; } = default!;
+    public string Address { get; set; } = default!;
+    public bool IsActive { get; set; }
+    public string Status { get; set; } = default!;
+
+    public static RestaurantSummaryResponse FromDomain(Restaurant r) => new()
+    {
+        Id = r.Id,
+        Name = r.Name,
+        Description = r.Description,
+        Address = r.Address,
+        IsActive = r.IsActive,
+        Status = r.Status.ToString()
+    };
+}

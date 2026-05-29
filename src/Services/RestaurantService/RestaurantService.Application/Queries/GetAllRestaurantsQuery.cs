@@ -3,6 +3,8 @@ using RestaurantService.Application.Interfaces;
 
 namespace RestaurantService.Application.Queries;
 
+public sealed class GetAllRestaurantsQuery { }
+
 public sealed class GetAllRestaurantsQueryHandler
 {
     private readonly IRestaurantRepository _repository;
@@ -10,9 +12,11 @@ public sealed class GetAllRestaurantsQueryHandler
     public GetAllRestaurantsQueryHandler(IRestaurantRepository repository)
         => _repository = repository;
 
-    public async Task<List<RestaurantResponse>> HandleAsync(CancellationToken ct = default)
+    public async Task<List<RestaurantSummaryResponse>> HandleAsync(
+        GetAllRestaurantsQuery query,
+        CancellationToken ct = default)
     {
-        var restaurants = await _repository.GetAllAsync(ct);
-        return restaurants.Select(RestaurantResponse.FromDomain).ToList();
+        var restaurants = await _repository.GetAllActiveAsync(ct);
+        return restaurants.Select(RestaurantSummaryResponse.FromDomain).ToList();
     }
 }

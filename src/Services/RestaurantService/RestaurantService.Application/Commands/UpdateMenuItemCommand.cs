@@ -1,33 +1,54 @@
-using RestaurantService.Application.Common;
+using FluentValidation;
+using RestaurantService.Application.DTOs;
 using RestaurantService.Application.Interfaces;
+using RestaurantService.Domain.Exceptions;
 
 namespace RestaurantService.Application.Commands;
 
-public record UpdateMenuItemCommand(Guid RestaurantId, Guid MenuItemId, Guid OwnerId, string Name, decimal Price);
+public record UpdateMenuItemCommand(
+    Guid RestaurantId,
+    Guid MenuItemId,
+    Guid RequestingOwnerId,
+    string? Name,
+    string? Description,
+    decimal? Price,
+    bool? Available);
 
 public sealed class UpdateMenuItemCommandHandler
 {
     private readonly IRestaurantRepository _repository;
+    private readonly IValidator<UpdateMenuItemCommand> _validator;
 
-    public UpdateMenuItemCommandHandler(IRestaurantRepository repository)
-        => _repository = repository;
-
-    public async Task<CommandResult> HandleAsync(UpdateMenuItemCommand command, CancellationToken ct = default)
+    public UpdateMenuItemCommandHandler(
+        IRestaurantRepository repository,
+        IValidator<UpdateMenuItemCommand> validator)
     {
-        var restaurant = await _repository.GetByIdAsync(command.RestaurantId, ct);
-        if (restaurant is null)
-            return CommandResult.NotFound();
+        _repository = repository;
+        _validator = validator;
+    }
 
-        if (restaurant.OwnerUserId != command.OwnerId)
-            return CommandResult.Forbidden();
+    public async Task<MenuItemResponse> HandleAsync(
+        UpdateMenuItemCommand command,
+        CancellationToken ct = default)
+    {
+        await _validator.ValidateAndThrowAsync(command, ct);
 
-        var item = restaurant.MenuItems.FirstOrDefault(m => m.Id == command.MenuItemId);
-        if (item is null)
-            return CommandResult.NotFound();
+        var restaurant = await _repository.GetByIdWithItemsAsync(command.RestaurantId, ct)
+            ?? throw new RestaurantNotFoundException(command.RestaurantId);
 
-        item.Update(command.Name, command.Price);
+        if (restaurant.OwnerId != command.RequestingOwnerId)
+            throw new RestaurantOwnershipException(command.RestaurantId, command.RequestingOwnerId);
+
+        restaurant.UpdateMenuItem(
+            command.MenuItemId,
+            command.Name,
+            command.Description,
+            command.Price,
+            command.Available);
+
         await _repository.SaveChangesAsync(ct);
 
-        return CommandResult.Success();
+        var item = restaurant.MenuItems.First(m => m.Id == command.MenuItemId);
+        return MenuItemResponse.FromDomain(item);
     }
 }
