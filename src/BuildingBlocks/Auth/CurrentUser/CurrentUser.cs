@@ -4,16 +4,13 @@ using Microsoft.AspNetCore.Http;
 
 namespace Auth.CurrentUser;
 
-public sealed class CurrentUser
-    : ICurrentUser
+public sealed class CurrentUser : ICurrentUser
 {
-    private readonly IHttpContextAccessor _httpContextAccessor;
-
-    public CurrentUser(
-        IHttpContextAccessor httpContextAccessor)
+    public CurrentUser(IHttpContextAccessor httpContextAccessor)
     {
         _httpContextAccessor = httpContextAccessor;
     }
+    private readonly IHttpContextAccessor _httpContextAccessor;
 
     public Guid UserId
     {

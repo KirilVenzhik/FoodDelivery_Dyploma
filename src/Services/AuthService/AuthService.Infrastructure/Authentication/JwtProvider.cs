@@ -12,13 +12,11 @@ namespace AuthService.Infrastructure.Authentication;
 
 public class JwtProvider : IJwtProvider
 {
-    private readonly JwtOptions _options;
-
-    public JwtProvider(
-        IOptions<JwtOptions> options)
+    public JwtProvider(IOptions<JwtOptions> options)
     {
         _options = options.Value;
     }
+    private readonly JwtOptions _options;
 
     public string Generate(User user)
     {
@@ -32,15 +30,14 @@ public class JwtProvider : IJwtProvider
         var signingCredentials = new SigningCredentials(
             new SymmetricSecurityKey(
                 Encoding.UTF8.GetBytes(_options.SecretKey)),
-            SecurityAlgorithms.HmacSha256);
+                SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(
             issuer: _options.Issuer,
             audience: _options.Audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(
-                _options.ExpirationMinutes),
-            signingCredentials: signingCredentials);
+            expires: DateTime.UtcNow.AddMinutes(_options.ExpirationMinutes),
+                signingCredentials: signingCredentials);
 
         return new JwtSecurityTokenHandler()
             .WriteToken(token);

@@ -7,13 +7,11 @@ namespace AuthService.Infrastructure.Repositories;
 
 public class UserRepository : IUserRepository
 {
-    private readonly AuthDbContext _dbContext;
-
-    public UserRepository(
-        AuthDbContext dbContext)
+    public UserRepository(AuthDbContext dbContext)
     {
         _dbContext = dbContext;
     }
+    private readonly AuthDbContext _dbContext;
 
     public async Task<bool> ExistsByEmailAsync(
         string email,
