@@ -1379,3 +1379,71 @@ xUnit + Moq + FluentAssertions.
 - **Composite idempotency key `(CorrelationId, NotificationType)`** — replaces the single `EventId` UUID. This allows one saga order to generate multiple notification types (`OrderPlaced`, `PaymentSuccess`, etc.) without the second event being treated as a duplicate of the first.
 - **`CreateNotificationCommandHandler.ToResponse()` shared static** — all 4 handlers and both query handlers reuse the same `internal static NotificationResponse ToResponse(Notification n)` method defined on `CreateNotificationCommandHandler`. Avoids duplication without introducing a separate mapper class.
 - **Consumer transaction wraps handler call** — `handler.HandleAsync()` calls `_repository.SaveChangesAsync()` internally (flushes within the open transaction but does not commit), then the consumer adds `ProcessedEvent`, calls `db.SaveChangesAsync()`, and commits — same pattern as DeliveryService and PaymentService consumers.
+
+---
+
+## Session Progress (2026-05-29, ApiGateway production polish)
+
+Branch: `master` (commit `359e688`)
+
+### Goal
+Polish ApiGateway to production quality. Previous implementation was a skeleton:
+`AddJwtAuthentication` was wired but `AddAuthServices` was missing; correlation was an inline
+hack that didn't use BuildingBlocks; no Serilog; no authorization policies on routes;
+restaurant route not split for public/protected; payment and notification clusters missing from
+docker-compose env vars; gateway port was 5036 instead of the spec-required 5000.
+
+### Changes — `ApiGateway.csproj`
+
+Added `ProjectReference` to `BuildingBlocks/Observability/Observability.csproj` — required for
+`ConfigureLogging`, `AddCorrelation`, and `UseCorrelation`.
+
+### Changes — `Program.cs`
+
+Complete rewrite of the pipeline:
+
+- `builder.Host.ConfigureLogging(builder.Configuration)` — Serilog via `LoggingExtensions.ConfigureLogging` from Observability BuildingBlock (was `builder.Host.UseSerilog(...)` inline; changed to the shared extension).
+- `AddReverseProxy().LoadFromConfig(...).AddTransforms(...)` — global YARP request transform that injects `X-Correlation-Id` from `CorrelationContext` into every proxied request. Needed because `CorrelationMiddleware` stores the generated GUID in `CorrelationContext` but doesn't write it back to `context.Request.Headers`; YARP would not forward it for requests that arrived without the header. The transform removes any existing value and sets the canonical one from context.
+- `AddJwtAuthentication(builder.Configuration)` — unchanged.
+- `AddAuthServices()` — added (was missing); registers `ICurrentUser` + `IHttpContextAccessor`.
+- `AddCorrelation()` — added (was missing); registers scoped `CorrelationContext`.
+- `AddAuthorization(options => options.AddPolicy("authenticated", policy => policy.RequireAuthenticatedUser()))` — adds the named policy used by protected YARP routes.
+- Middleware pipeline: `UseCorrelation()` → `UseAuthentication()` → `UseAuthorization()` → `MapReverseProxy()`.
+- Removed `UseSwaggerUI()` (gateway has no Swagger; swagger routes in appsettings removed).
+- Removed inline `app.Use(...)` correlation hack.
+
+### Changes — `appsettings.json`
+
+- Added `Serilog` section (Console + Seq at `http://localhost:5341`; `MinimumLevel: "Warning"`).
+- `Logging.LogLevel.Default` changed to `"Warning"` (suppresses info logs to console).
+- Restaurant route split into two YARP routes:
+  - `restaurants_public_route` — `Methods: ["GET"]`, no `AuthorizationPolicy` (public list + detail endpoints).
+  - `restaurants_protected_route` — `Methods: ["POST","PUT","PATCH","DELETE"]`, `AuthorizationPolicy: "authenticated"`.
+- `orders_route`, `payments_route`, `notifications_route`, `deliveries_route` — all have `AuthorizationPolicy: "authenticated"`.
+- `auth_route` — no policy (register/login are public).
+- Removed all swagger proxy routes (`auth_swagger_route`, etc.) — unnecessary.
+- Cluster/destination IDs kept with underscore naming to preserve docker-compose env var compatibility.
+
+### Changes — `Properties/launchSettings.json`
+
+Port changed from `5036` to `5000` (entry point for all clients per diploma spec).
+
+### Changes — `docker-compose.yml` (api-gateway section only)
+
+- Added Jwt env vars (`Jwt__Issuer`, `Jwt__Audience`, `Jwt__SecretKey`, `Jwt__ExpirationMinutes`) — gateway validates JWTs so it needs the same secret as all downstream services.
+- Added `payment_cluster` and `notification_cluster` destination address overrides — these were missing; gateway would fail to proxy `/api/payments/*` and `/api/notifications/*` in Docker.
+- Added `payment-service` and `notification-service` to gateway's `depends_on`.
+- Port changed from `5036:8080` to `5000:8080`.
+
+### Changes — all `appsettings.json` files (log level)
+
+All 7 service appsettings updated — `Serilog.MinimumLevel.Default` (services using Serilog section) and `Logging.LogLevel.Default` (services using plain Logging section) changed from `"Information"` to `"Warning"`. Info logs no longer appear in the console. Warning, Error, and Fatal still reach the console and Seq.
+
+### Final state
+- `dotnet build src/ApiGateway/ApiGateway/ApiGateway.csproj` — 0 errors, 0 warnings
+
+### Key decisions
+- **`ConfigureLogging` over inline `UseSerilog`** — uses the shared Observability BuildingBlock extension, consistent with all other services.
+- **YARP `AddTransforms` for correlation forwarding** — avoids modifying `context.Request.Headers` directly (fragile) or hardcoding the header in YARP route config (static). The transform runs after `CorrelationMiddleware` has set `CorrelationContext.CorrelationId`, so the canonical value is always injected.
+- **Underscore cluster/destination IDs kept** — docker-compose uses `ReverseProxy__Clusters__auth_cluster__Destinations__auth_destination__Address` style env vars. Renaming to dashes would require corresponding docker-compose changes with no functional benefit.
+- **Restaurant route split by HTTP method** — single YARP route cannot be both public (GET) and protected (POST/PATCH/DELETE). Split into two routes matching on `Methods` array; downstream RestaurantService still enforces ownership at the command handler level as a second layer.
