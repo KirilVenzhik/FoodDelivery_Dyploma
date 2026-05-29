@@ -2,11 +2,12 @@ namespace NotificationService.Application.DTOs;
 
 public sealed class NotificationResponse
 {
-    public Guid Id { get; set; }
-    public Guid UserId { get; set; }
-    public Guid OrderId { get; set; }
-    public string Message { get; set; } = default!;
-    public string Type { get; set; } = default!;
-    public DateTime SentAt { get; set; }
-    public DateTime CreatedAt { get; set; }
+    public Guid Id { get; init; }
+    public Guid UserId { get; init; }
+    public Guid OrderId { get; init; }
+    public string Message { get; init; } = default!;
+    public string Type { get; init; } = default!;
+    public bool IsRead { get; init; }
+    public DateTime CreatedAt { get; init; }
+    public DateTime? SentAt { get; init; }
 }
