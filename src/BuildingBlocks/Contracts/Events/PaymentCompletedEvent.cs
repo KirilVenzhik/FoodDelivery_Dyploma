@@ -9,4 +9,8 @@ public class PaymentCompletedEvent : IntegrationEvent
     public Guid PaymentId { get; init; }
 
     public decimal Amount { get; init; }
+
+    public Guid ClientId { get; init; }
+
+    public Guid RestaurantId { get; init; }
 }

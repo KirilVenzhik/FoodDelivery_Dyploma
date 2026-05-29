@@ -7,4 +7,6 @@ public class DeliveryCompletedEvent : IntegrationEvent
     public Guid OrderId { get; init; }
 
     public Guid DeliveryId { get; init; }
+
+    public Guid CourierId { get; init; }
 }
