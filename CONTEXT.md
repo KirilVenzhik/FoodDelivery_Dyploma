@@ -928,3 +928,137 @@ xUnit 2.9.2 + Moq 4.20.72 + FluentAssertions 6.12.0. Added to `FoodDelivery.sln`
 - **`GetByIdAsync` vs `GetByIdWithItemsAsync` split** — write ops that don't return a response with menu items use the leaner no-include variant; all read ops and ops returning `RestaurantResponse` use the include variant.
 - **`ChangeAvailability` consolidates `Open`/`Close`** — single command with `bool IsActive` param; controller has two endpoints (`/open`, `/close`) that both call `ChangeRestaurantAvailabilityCommand`.
 - **`RestaurantManager` role string kept** — controller `[Authorize(Roles = "RestaurantManager")]` kept as-is for compatibility with JWT tokens issued by AuthService. Diploma spec says `RestaurantOwner` but AuthService issues `RestaurantManager` in token claims.
+
+---
+
+## Session Progress (2026-05-29, PaymentService production polish)
+
+Branch: `master` (commits `87dd631`, `183e8e6`, `2b740ac`, `69c3bc1`)
+
+### Goal
+Polish PaymentService to production quality. Previous implementation was functional
+but anemic: no domain events, no typed exceptions, no `ClientId` on the aggregate,
+business logic embedded directly in the RabbitMQ consumer (no Application layer command handler),
+random success/fail in consumer, old `CommandResult`/`QueryResult` result-object pattern in the
+query handler and controller, and no unit tests.
+
+### Changes — Domain Layer (`PaymentService.Domain`)
+
+**`Payment` aggregate — updated:**
+- Added `ClientId (Guid)` property — identifies the customer who owns this payment
+- `Create(orderId, correlationId, clientId, amount)` — added `clientId` parameter; raises `PaymentCreatedDomainEvent` after construction
+- `Complete()` — added guard: throws `InvalidPaymentOperationException` if `Status != Pending`; raises `PaymentCompletedDomainEvent`
+- `Fail(string reason)` — added `reason` parameter; added same guard; raises `PaymentFailedDomainEvent`
+
+**New: `Events/` folder (3 files):** all are `sealed class : DomainEvent`:
+- `PaymentCreatedDomainEvent(PaymentId, OrderId, Amount)`
+- `PaymentCompletedDomainEvent(PaymentId, OrderId, CorrelationId, Amount)`
+- `PaymentFailedDomainEvent(PaymentId, OrderId, CorrelationId, Reason)`
+
+**New: `Exceptions/` folder (3 files):**
+- `PaymentNotFoundException(Guid orderId)` — thrown by query handler when payment not found by order id → 404
+- `InvalidPaymentOperationException(string message)` — thrown by `Complete()`/`Fail()` on bad state transition → 400
+- `DuplicatePaymentException(Guid orderId)` — thrown by `ProcessPaymentCommandHandler` on duplicate OrderId → 409
+
+### Changes — Application Layer (`PaymentService.Application`)
+
+**`IPaymentRepository`:** added `GetByIdAsync(Guid id, CancellationToken)` method.
+
+**`PaymentResponse` DTO:** added `ClientId (Guid)` property.
+
+**New: `Commands/ProcessPaymentCommand.cs`** — command record + handler in one file:
+- `ProcessPaymentCommand(OrderId, CorrelationId, ClientId, Amount)`
+- `ProcessPaymentCommandHandler` — injects `IPaymentRepository` + `IEventBus`
+- Step 1: `GetByOrderIdAsync` — throws `DuplicatePaymentException` if result is not null
+- Step 2: `Payment.Create(orderId, correlationId, clientId, amount)` + `AddAsync` + `SaveChangesAsync` (Pending)
+- Step 3: `payment.Complete()` + `SaveChangesAsync` (Completed) — always succeeds for MVP
+- Step 4: `IEventBus.PublishAsync(PaymentCompletedEvent, "payment.completed")`
+- Step 5: returns `PaymentResponse`
+
+**`GetPaymentByOrderIdQuery` — rewritten:**
+- Now takes `(OrderId, RequestingClientId, RequestingRole)` — required for ownership check
+- Returns `Task<PaymentResponse>` (was `Task<QueryResult<PaymentResponse>>`)
+- Throws `PaymentNotFoundException` if payment not found (was returning `QueryResult.NotFound()`)
+- Throws `UnauthorizedAccessException` if role is `"Customer"` and `ClientId != RequestingClientId`
+
+**`PaymentService.Application.csproj`:** added `<ProjectReference>` to `BuildingBlocks/EventBus/EventBus.csproj` — required for `IEventBus` in the command handler.
+
+**`Common/CommandResult.cs` and `Common/QueryResult.cs`:** left in place as dead code (not deleted to avoid unnecessary churn; no longer used by anything).
+
+### Changes — Infrastructure Layer (`PaymentService.Infrastructure`)
+
+**`PaymentConfiguration`:** added explicit `HasColumnName()` for all properties in snake_case:
+`id`, `order_id`, `correlation_id`, `client_id`, `amount`, `status`, `created_at`, `processed_at`.
+`Amount` uses `HasColumnType("decimal(18,2)")`.
+
+**`PaymentRepository`:** added `GetByIdAsync` implementation.
+
+**`PaymentRequestedConsumer` — refactored:**
+- Removed `IEventBus` constructor dependency (publishing is now the handler's responsibility)
+- On each message: creates scope, resolves `PaymentDbContext` + `ProcessPaymentCommandHandler`
+- Begins an explicit EF `IDbContextTransaction` (`db.Database.BeginTransactionAsync()`)
+- Checks `ProcessedEvents` for idempotency (`evt.Id`) — acks and returns if already processed
+- Calls `handler.HandleAsync(command, ct)` — handler's two `SaveChangesAsync` calls flush within the open transaction but do not commit
+- Adds `ProcessedEvent` to context and calls `db.SaveChangesAsync()`
+- Commits transaction — all three DB writes (insert payment, update payment status, insert processed_event) are atomic
+- `DuplicatePaymentException` caught → ack (payment already exists for this order, no need to retry)
+- Removed `Random.Shared.Next()` success/fail flip — always succeeds (MVP spec)
+
+**`DependencyInjection`:** added `services.AddScoped<ProcessPaymentCommandHandler>()`.
+
+**New EF migration `AddClientIdAndSnakeCaseColumns`** (`20260529005147_AddClientIdAndSnakeCaseColumns`):
+- Adds `client_id (uuid NOT NULL)` column to `payments`
+- Renames existing columns to snake_case where names differed
+
+**`PaymentService.API.csproj`:** added references to `BuildingBlocks/Observability/Observability.csproj` and `Serilog.AspNetCore` package.
+
+### Changes — API Layer (`PaymentService.API`)
+
+**New: `Middlewares/ExceptionHandlingMiddleware.cs`:**
+| Exception | HTTP Status |
+|---|---|
+| `PaymentNotFoundException` | 404 Not Found |
+| `DuplicatePaymentException` | 409 Conflict |
+| `InvalidPaymentOperationException` | 400 Bad Request |
+| `UnauthorizedAccessException` | 403 Forbidden (+ Warning log) |
+| Unhandled `Exception` | 500 Internal Server Error (logged at Error) |
+
+**`PaymentsController` — rewritten:**
+- Injects `GetPaymentByOrderIdQueryHandler` + `ICurrentUser`
+- `GET /api/payments/{orderId:guid} [Authorize]` — passes `_currentUser.UserId` and `_currentUser.Role` into query; returns `Ok(response)` directly (middleware handles exceptions)
+
+**`Program.cs` — updated:**
+- Added `builder.Host.ConfigureLogging(builder.Configuration)` — Serilog via `LoggingExtensions`
+- Added `builder.Services.AddAuthServices()` — registers `ICurrentUser` / `IHttpContextAccessor`
+- Added `builder.Services.AddCorrelation()`
+- Added `app.UseMiddleware<ExceptionHandlingMiddleware>()` (before auth)
+- Added `app.UseCorrelation()`
+
+### Tests — `PaymentService.Tests` (new project, `src/Services/PaymentService/PaymentService.Tests`)
+
+xUnit 2.9.2 + Moq 4.20.72 + FluentAssertions 6.12.0. Added to `FoodDelivery.sln`.
+
+**`PaymentEntityTests.cs` (9 tests):**
+`Create_WithValidData_SetsStatusPending`; `Create_RaisesPaymentCreatedDomainEvent`;
+`Complete_SetsStatusCompleted`; `Complete_SetsProcessedAt`; `Complete_RaisesPaymentCompletedDomainEvent`;
+`Fail_SetsStatusFailed`; `Fail_RaisesPaymentFailedDomainEvent`;
+`Complete_WhenAlreadyCompleted_ThrowsInvalidPaymentOperationException`;
+`Fail_WhenAlreadyCompleted_ThrowsInvalidPaymentOperationException`.
+
+**`ProcessPaymentCommandHandlerTests.cs` (3 tests):**
+`Handle_NewPayment_CreatesAndCompletesPayment`; `Handle_NewPayment_PublishesPaymentCompletedEvent`;
+`Handle_DuplicateOrderId_ThrowsDuplicatePaymentException`.
+
+**`GetPaymentByOrderIdQueryHandlerTests.cs` (3 tests):**
+`Handle_ExistingPayment_ReturnsPaymentResponse`; `Handle_UnknownOrderId_ThrowsPaymentNotFoundException`;
+`Handle_CustomerAccessingOthersPayment_ThrowsUnauthorizedAccessException`.
+
+### Final state
+- `dotnet build src/Services/PaymentService/PaymentService.API` — 0 errors, 0 warnings
+- `dotnet test src/Services/PaymentService/PaymentService.Tests` — **15/15 passed**
+
+### Key decisions
+- **Explicit transaction in consumer** — the consumer wraps the handler call + `ProcessedEvent` insert in a single `IDbContextTransaction`. The handler's two `SaveChangesAsync()` calls flush SQL within the transaction but do not commit; `CommitAsync()` in the consumer makes all three writes atomic. This satisfies both "consumer must be idempotent via processed_events" and "handler + consumer DB save in one transaction".
+- **`ProcessPaymentCommandHandler` always succeeds (MVP)** — `Fail(reason)` path is preserved in domain for correctness but never triggered by the handler. The consumer no longer uses `Random.Shared.Next()`.
+- **`Application.csproj` → `EventBus` reference** — handler directly uses `IEventBus` for publishing; the interface lives in the EventBus BuildingBlock so Application needs the reference. This is a deliberate pragmatic choice over introducing a redundant `IPaymentEventPublisher` wrapper.
+- **`DuplicatePaymentException` → ack** — if the handler throws this, it means the payment for this `OrderId` was already processed (different event ID, same order). Consumer acks rather than requeuing since retrying would always throw again.
