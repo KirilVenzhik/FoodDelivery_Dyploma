@@ -23,12 +23,12 @@ food-delivery-dyploma/
     │   ├── Observability/
     │   └── Shared/
     └── Services/
-        ├── AuthService/          — partially implemented, use as primary pattern reference
-        ├── RestaurantService/    — partially implemented, use as pattern reference
-        ├── OrderService/         — partially implemented, needs full rework
-        ├── PaymentService/       — partially implemented, needs full rework
-        ├── NotificationService/  — partially implemented, needs full implementation
-        └── DeliveryService/      — partially implemented, needs full implementation
+        ├── AuthService/          — complete, production quality ✅
+        ├── RestaurantService/    — complete, production quality ✅
+        ├── OrderService/         — complete, production quality ✅
+        ├── PaymentService/       — complete, production quality ✅
+        ├── NotificationService/  — complete (event-driven only) ✅
+        └── DeliveryService/      — complete, production quality ✅
 ```
 
 **IMPORTANT:** Every service in this solution is partially implemented to varying degrees.
@@ -200,17 +200,28 @@ Table `notifications`:
 **Responsibility:** Delivery coordination and courier management
 
 **Flow:**
-1. Consumes `PaymentCompleted` or a `DeliveryRequested` event
-2. Creates Delivery with status `Pending`
-3. Courier assigns → `Assigned`, picks up → `InProgress`, delivers → `Delivered`
-4. Publishes `DeliveryCompleted` → OrderService updates order to `Delivered`
+1. Consumes `PaymentCompleted` from RabbitMQ → creates Delivery with status `Pending`
+2. Courier self-assigns via `PATCH /{id}/assign` → `Assigned`
+3. Courier picks up via `PATCH /{id}/pickup` → `InProgress`
+4. Courier completes via `PATCH /{id}/complete` → `Delivered`; publishes `DeliveryCompleted` → OrderService updates order to `Delivered`
+
+**Endpoints:**
+- `GET /api/deliveries/pending [Courier]` — lists all pending deliveries
+- `GET /api/deliveries/my [Courier]` — lists courier's own deliveries
+- `GET /api/deliveries/{id} [Authorize]` — role-scoped: Customer sees own, Courier sees assigned, Admin sees all
+- `PATCH /api/deliveries/{id}/assign [Courier]` → 200 + DeliveryResponse
+- `PATCH /api/deliveries/{id}/pickup [Courier]` → 200 + DeliveryResponse
+- `PATCH /api/deliveries/{id}/complete [Courier]` → 200 + DeliveryResponse
 
 **DB schema (DeliveryDB):**
 
 Table `deliveries`:
-- id (Guid PK), order_id (Guid), courier_id (Guid?)
-- status (DeliveryStatus: Pending/Assigned/InProgress/Delivered/Failed)
-- created_at (DateTime UTC), updated_at (DateTime UTC)
+- id (Guid PK), order_id (Guid), correlation_id (Guid), client_id (Guid), restaurant_id (Guid)
+- courier_id (Guid?), status (int: Pending=0/Assigned=1/InProgress=2/Delivered=3/Failed=4)
+- created_at, updated_at (DateTime UTC)
+
+Table `processed_events`:
+- event_id (Guid PK), processed_at (DateTime UTC) — keyed by CorrelationId for saga idempotency
 
 ---
 
@@ -1062,3 +1073,163 @@ xUnit 2.9.2 + Moq 4.20.72 + FluentAssertions 6.12.0. Added to `FoodDelivery.sln`
 - **`ProcessPaymentCommandHandler` always succeeds (MVP)** — `Fail(reason)` path is preserved in domain for correctness but never triggered by the handler. The consumer no longer uses `Random.Shared.Next()`.
 - **`Application.csproj` → `EventBus` reference** — handler directly uses `IEventBus` for publishing; the interface lives in the EventBus BuildingBlock so Application needs the reference. This is a deliberate pragmatic choice over introducing a redundant `IPaymentEventPublisher` wrapper.
 - **`DuplicatePaymentException` → ack** — if the handler throws this, it means the payment for this `OrderId` was already processed (different event ID, same order). Consumer acks rather than requeuing since retrying would always throw again.
+
+---
+
+## Session Progress (2026-05-29, DeliveryService production polish)
+
+Branch: `master` (commits `27d51ac`, `65678f5`, `3944f11`, `b972459`)
+
+### Goal
+Polish DeliveryService to production quality. Previous implementation was anemic:
+Delivery entity had no `CorrelationId`/`ClientId`/`RestaurantId`, no domain events, no status
+transition guards, no typed exceptions. Handlers used the `CommandResult`/`QueryResult`
+result-object pattern (no exceptions). The consumer created `Delivery` directly (bypassing
+Application layer). `DeliveryCompletedEvent` was missing `CourierId`; `PaymentCompletedEvent`
+was missing `ClientId` and `RestaurantId`, making delivery creation impossible.
+
+### Changes — BuildingBlocks/Contracts
+
+**`PaymentCompletedEvent`:** added `ClientId (Guid)` and `RestaurantId (Guid)` — required by
+`CreateDeliveryCommandHandler` to construct a full Delivery record from a single event.
+
+**`DeliveryCompletedEvent`:** added `CourierId (Guid)` — required by OrderService and for
+the `CompleteDeliveryCommandHandler` to populate the integration event correctly.
+`CorrelationId` was already present via `IntegrationEvent` base class.
+
+### Changes — Domain Layer (`DeliveryService.Domain`)
+
+**`DeliveryStatus` enum:** added explicit int values `Pending=0, Assigned=1, InProgress=2, Delivered=3, Failed=4`.
+
+**`Delivery` aggregate — complete rewrite:**
+- Added `CorrelationId (Guid)`, `ClientId (Guid)`, `RestaurantId (Guid)` properties
+- `Create(orderId, correlationId, clientId, restaurantId)` — raises `DeliveryCreatedDomainEvent`
+- `Assign(courierId)` — guards `Status != Pending` → throws `InvalidDeliveryStatusTransitionException`; raises `DeliveryAssignedDomainEvent`
+- `PickUp()` — guards `Status != Assigned` → throws `InvalidDeliveryStatusTransitionException`; raises `DeliveryPickedUpDomainEvent`
+- `Complete()` — guards `Status != InProgress` → throws `InvalidDeliveryStatusTransitionException`; raises `DeliveryCompletedDomainEvent`
+- `Fail(string reason)` — guards `Status == Delivered` → throws; raises `DeliveryFailedDomainEvent`
+
+**New: `Events/` folder (5 files):** all are `sealed class : DomainEvent`:
+- `DeliveryCreatedDomainEvent(DeliveryId, OrderId, ClientId)`
+- `DeliveryAssignedDomainEvent(DeliveryId, OrderId, CourierId)`
+- `DeliveryPickedUpDomainEvent(DeliveryId, OrderId, CourierId)`
+- `DeliveryCompletedDomainEvent(DeliveryId, OrderId, CorrelationId, CourierId)`
+- `DeliveryFailedDomainEvent(DeliveryId, OrderId, Reason)`
+
+**New: `Exceptions/` folder (3 files):**
+- `DeliveryNotFoundException(Guid id)` → 404
+- `InvalidDeliveryStatusTransitionException(DeliveryStatus current, DeliveryStatus target)` → 409
+- `DeliveryAlreadyAssignedException(Guid id)` → 409 (thrown by handler before calling domain method)
+
+### Changes — Application Layer (`DeliveryService.Application`)
+
+**Deleted:** `Common/CommandResult.cs`, `Common/QueryResult.cs` — replaced by exception pattern throughout.
+
+**`IDeliveryRepository`:** added `GetPendingAsync() → Task<IEnumerable<Delivery>>`.
+
+**`DeliveryResponse` DTO:** added `CorrelationId`, `ClientId`, `RestaurantId` fields.
+
+**New: `Commands/CreateDeliveryCommand.cs`:** `CreateDeliveryCommand(OrderId, CorrelationId, ClientId, RestaurantId)` + handler — checks `GetByOrderIdAsync` for idempotency, throws `InvalidOperationException` if delivery already exists, calls `Delivery.Create()`, returns `DeliveryResponse`.
+
+**`AssignDeliveryCommand` — rewritten:**
+- Returns `Task<DeliveryResponse>` (was `CommandResult`)
+- Throws `DeliveryNotFoundException` if not found; `DeliveryAlreadyAssignedException` if `Status != Pending`; then calls `delivery.Assign()`
+
+**`PickUpDeliveryCommand` (renamed from `PickupDeliveryCommand`):**
+- Returns `Task<DeliveryResponse>`; throws `DeliveryNotFoundException`; verifies `CourierId == delivery.CourierId` → throws `UnauthorizedAccessException`; calls `delivery.PickUp()`
+
+**`CompleteDeliveryCommand` — rewritten:**
+- Returns `Task<DeliveryResponse>`; throws `DeliveryNotFoundException`; verifies ownership; calls `delivery.Complete()`
+- Publishes `DeliveryCompletedEvent { OrderId, DeliveryId, CorrelationId, CourierId }` via `IEventBus` (routing key: `"delivery.completed"`) — publish BEFORE `SaveChangesAsync`
+
+**`GetDeliveryByIdQuery` — rewritten:**
+- Takes `(DeliveryId, RequestingUserId, RequestingRole)`
+- Throws `DeliveryNotFoundException`; role-based access: Customer checks `ClientId`, Courier checks `CourierId`, all others (Admin) pass through
+
+**`GetMyDeliveriesQuery` (renamed from `GetDeliveriesByCourierQuery`):** unchanged logic; class renamed for clarity.
+
+**New: `GetPendingDeliveriesQuery` + handler:** calls `GetPendingAsync()`, returns `List<DeliveryResponse>`.
+
+### Changes — Infrastructure Layer (`DeliveryService.Infrastructure`)
+
+**`DeliveryConfiguration`:** all columns mapped with `HasColumnName` snake_case: `id`, `order_id`, `correlation_id`, `client_id`, `restaurant_id`, `courier_id`, `status`, `created_at`, `updated_at`.
+
+**`ProcessedEventConfiguration`:** `event_id`, `processed_at` column names added.
+
+**`DeliveryRepository`:** added `GetPendingAsync` — filters `WHERE status = 0 (Pending)`, ordered by `created_at`.
+
+**`PaymentCompletedConsumer` — major rewrite:**
+- Idempotency check uses `evt.CorrelationId` as `EventId` in `processed_events` (was `evt.Id`) — one entry per saga
+- Creates explicit `IDbContextTransaction`
+- Resolves `CreateDeliveryCommandHandler` from scope and delegates via `HandleAsync`
+- Saves `ProcessedEvent` + calls `db.SaveChangesAsync()` + `transaction.CommitAsync()` — all atomic
+- On exception: nack with requeue; `InvalidOperationException` (duplicate delivery) logs and acks
+
+**`DeliveryRequestedConsumer`:** **deleted** — spec requires only `PaymentCompletedEvent` to trigger delivery creation; consumer would break after Domain changes.
+
+**`DependencyInjection`:** registered `CreateDeliveryCommandHandler`, `PickUpDeliveryCommandHandler`, `GetMyDeliveriesQueryHandler`, `GetPendingDeliveriesQueryHandler`; removed `DeliveryRequestedConsumer` hosted service.
+
+**New EF migration `RefactorSchema`** (`20260529011738_RefactorSchema`):
+- Renames all columns to snake_case
+- Adds `correlation_id`, `client_id`, `restaurant_id` columns to `deliveries`
+- Adds `event_id`, `processed_at` snake_case rename in `processed_events`
+
+### Changes — API Layer (`DeliveryService.API`)
+
+**New: `Middlewares/ExceptionHandlingMiddleware.cs`:**
+| Exception | HTTP Status |
+|---|---|
+| `DeliveryNotFoundException` | 404 Not Found |
+| `InvalidDeliveryStatusTransitionException` | 409 Conflict |
+| `DeliveryAlreadyAssignedException` | 409 Conflict |
+| `UnauthorizedAccessException` | 403 Forbidden (+ Warning log) |
+| Unhandled `Exception` | 500 Internal Server Error (logged at Error) |
+
+**`DeliveriesController` — complete rewrite (thin, exception pattern):**
+- `GET /api/deliveries/pending [Courier]` → `GetPendingDeliveriesQueryHandler` → 200 + `List<DeliveryResponse>`
+- `GET /api/deliveries/my [Courier]` → `GetMyDeliveriesQueryHandler` → 200 + `List<DeliveryResponse>`
+- `GET /api/deliveries/{id} [Authorize]` → `GetDeliveryByIdQueryHandler(id, currentUser.UserId, currentUser.Role)` → 200 + `DeliveryResponse`
+- `PATCH /api/deliveries/{id}/assign [Courier]` → 200 + `DeliveryResponse`
+- `PATCH /api/deliveries/{id}/pickup [Courier]` → 200 + `DeliveryResponse`
+- `PATCH /api/deliveries/{id}/complete [Courier]` → 200 + `DeliveryResponse`
+
+**`Program.cs`:**
+- Added `builder.Host.ConfigureLogging(builder.Configuration)` — Serilog
+- Added `builder.Services.AddAuthServices()` — registers `ICurrentUser`
+- Added `builder.Services.AddCorrelation()`
+- Added `app.UseMiddleware<ExceptionHandlingMiddleware>()`
+- Added `app.UseCorrelation()`
+
+**`appsettings.json`:** added `Serilog` section (Console + File sinks).
+
+### Tests — `DeliveryService.Tests` (new project, `src/Services/DeliveryService/DeliveryService.Tests`)
+
+xUnit + Moq + FluentAssertions. Added to `FoodDelivery.sln`.
+
+**`DeliveryAggregateTests.cs` (13 tests):**
+`Create_SetsStatusPending`; `Create_RaisesDeliveryCreatedDomainEvent`;
+`Assign_WhenPending_SetsStatusAssigned`; `Assign_WhenPending_SetsCourierId`; `Assign_RaisesDeliveryAssignedDomainEvent`;
+`Assign_WhenAlreadyAssigned_ThrowsInvalidDeliveryStatusTransitionException`;
+`PickUp_WhenAssigned_SetsStatusInProgress`; `PickUp_WhenPending_Throws`; `PickUp_RaisesDeliveryPickedUpDomainEvent`;
+`Complete_WhenInProgress_SetsStatusDelivered`; `Complete_WhenAssigned_Throws`; `Complete_RaisesDeliveryCompletedDomainEvent`;
+`Fail_WhenDelivered_Throws`.
+
+**`AssignDeliveryCommandHandlerTests.cs` (3 tests):**
+Happy path assigns + returns `DeliveryResponse`; not found → `DeliveryNotFoundException`; already assigned → `DeliveryAlreadyAssignedException`.
+
+**`CompleteDeliveryCommandHandlerTests.cs` (3 tests):**
+Happy path publishes `DeliveryCompletedEvent` with correct `OrderId`+`CourierId` on routing key `"delivery.completed"`; wrong courier → `UnauthorizedAccessException`; not found → `DeliveryNotFoundException`.
+
+**`GetDeliveryByIdQueryHandlerTests.cs` (3 tests):**
+Admin returns `DeliveryResponse`; unknown id → `DeliveryNotFoundException`; Customer with mismatched `ClientId` → `UnauthorizedAccessException`.
+
+### Final state
+- `dotnet build src/Services/DeliveryService/DeliveryService.API` — 0 errors, 0 warnings
+- `dotnet test src/Services/DeliveryService/DeliveryService.Tests` — **22/22 passed**
+
+### Key decisions
+- **`PaymentCompletedEvent` as sole delivery trigger** — `DeliveryRequestedConsumer` (which consumed a separate `delivery.requested` event) was removed. The spec states delivery lifecycle starts on `PaymentCompleted`. Using two consumers for the same purpose created ambiguity and dead queue surface area.
+- **Idempotency keyed by `CorrelationId`** — `processed_events.event_id` stores the saga's `CorrelationId` (not the message's unique `Id`). For DeliveryService the invariant is "one delivery per saga", not "one delivery per message copy". Using `CorrelationId` correctly captures that invariant and survives message broker retries with different `Id`s.
+- **Handler check → domain guard layering** — `AssignDeliveryCommandHandler` checks `Status != Pending` → throws `DeliveryAlreadyAssignedException` (user-facing 409) before calling `delivery.Assign()` which throws `InvalidDeliveryStatusTransitionException` (domain invariant guard). The user gets a specific error message; the aggregate never enters an inconsistent state regardless.
+- **Publish before SaveChanges in `CompleteDeliveryCommandHandler`** — spec defines this order. Trade-off: if `SaveChangesAsync` fails after publish, the integration event is orphaned. For MVP this is acceptable; production would use outbox.
+- **`GetDeliveryByIdQuery` role-based access** — Customer checks `ClientId`, Courier checks `CourierId`, all other roles (Admin, RestaurantManager) pass through without checks. This follows the same pattern established in PaymentService and OrderService.
