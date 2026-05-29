@@ -1610,3 +1610,73 @@ After all fixes, the complete notification saga is:
   No code change made; this is a documentation-level discrepancy.
 - **No `/health` endpoints**: Services have no `MapHealthChecks` endpoint (NFR 7.1.2 gap).
 - **DataProtection warning**: All services log a warning about keys not persisted outside container — cosmetic, not functional.
+
+---
+
+## Session Progress (2026-05-29, test restructuring)
+
+Branch: `master` (commit `301b9d9`)
+
+### Goal
+Restructure all unit tests from the scattered `src/Services/{Name}/{Name}.Tests/` layout
+into a clean top-level `tests/` folder. Reduce the total test count from 121 across 6
+projects to exactly 47 across 4 projects matching the diploma specification.
+
+### Changes
+
+**Deleted from `src/`** — all 6 test projects removed from disk and from `FoodDelivery.sln`:
+`AuthService.Tests`, `OrderService.Tests`, `RestaurantService.Tests`, `PaymentService.Tests`,
+`DeliveryService.Tests`, `NotificationService.Tests`.
+
+**Created in `tests/`** — 4 new test projects, each added to `FoodDelivery.sln`:
+
+| Project | Tests | Classes |
+|---|---|---|
+| `AuthService.Tests` | 17 | `UserEntityTests`(6), `RegisterUserCommandHandlerTests`(4), `LoginUserCommandHandlerTests`(3), `JwtProviderTests`(3), `GetCurrentUserQueryHandlerTests`(1) |
+| `RestaurantService.Tests` | 12 | `RestaurantAggregateTests`(7), `MenuItemTests`(3), `CreateRestaurantCommandHandlerTests`(2) |
+| `OrderService.Tests` | 13 | `OrderAggregateTests`(9), `PlaceOrderCommandHandlerTests`(4) |
+| `PaymentService.Tests` | 5 | `PaymentEntityTests`(5) |
+
+**Total: 47 tests, 0 failures.**
+
+### Test project structure
+
+```
+tests/
+├── AuthService.Tests/
+│   ├── Domain/UserEntityTests.cs
+│   ├── Application/RegisterUserCommandHandlerTests.cs
+│   ├── Application/LoginUserCommandHandlerTests.cs
+│   ├── Application/GetCurrentUserQueryHandlerTests.cs
+│   └── Infrastructure/JwtProviderTests.cs
+├── RestaurantService.Tests/
+│   ├── Domain/RestaurantAggregateTests.cs
+│   ├── Domain/MenuItemTests.cs
+│   └── Application/CreateRestaurantCommandHandlerTests.cs
+├── OrderService.Tests/
+│   ├── Domain/OrderAggregateTests.cs
+│   └── Application/PlaceOrderCommandHandlerTests.cs
+└── PaymentService.Tests/
+    └── Domain/PaymentEntityTests.cs
+```
+
+Each project uses central package management (no version pins in csproj):
+xUnit 2.9.2 + Moq 4.20.72 + FluentAssertions 6.12.0 + coverlet.collector 6.0.2.
+Each has a `GlobalUsings.cs` with `global using Xunit;`.
+
+### Key decisions
+
+- **`JwtProviderTests` instantiates `JwtProvider` directly** — uses `Options.Create(new JwtOptions {...})`
+  with a fixed secret key; parses the emitted JWT with `JwtSecurityTokenHandler` to verify
+  `ClaimTypes.NameIdentifier` and `ClaimTypes.Role` claims. No mocking needed.
+- **`RegisterUserCommandHandlerTests` tests 9–10 use `RegisterRequestValidator` directly** —
+  `RegisterUserCommandHandler` has no validator in its constructor (validation runs at the API layer
+  via FluentValidation middleware). The two "FailsValidation" tests call `validator.ValidateAsync()`
+  on a `RegisterRequest` DTO to confirm field-level rules, placed in the handler test class per spec.
+- **`CreateRestaurantCommandHandlerTests` test 29 uses `UpdateRestaurantCommandHandler`** — the
+  create command has no ownership check (you are the owner on creation). The spec's
+  `Handle_WithWrongOwner_ThrowsRestaurantOwnershipException` test is satisfied by
+  `UpdateRestaurantCommandHandler` called with a non-matching `RequestingOwnerId`.
+- **csproj references** — `AuthService.Tests` references all 3 layers (Domain + Application +
+  Infrastructure) because `JwtProviderTests` needs `AuthService.Infrastructure`. The other 3
+  test projects reference Domain + Application only (no Infrastructure dependency needed).
