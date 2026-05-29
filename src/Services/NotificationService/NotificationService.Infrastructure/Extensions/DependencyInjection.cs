@@ -2,9 +2,10 @@ using EventBus.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using NotificationService.Application.Commands;
 using NotificationService.Application.Interfaces;
 using NotificationService.Application.Queries;
-using NotificationService.Infrastructure.BackgroundJobs;
+using NotificationService.Infrastructure.Messaging;
 using NotificationService.Infrastructure.Persistence;
 using NotificationService.Infrastructure.Repositories;
 
@@ -20,7 +21,11 @@ public static class DependencyInjection
             options.UseNpgsql(configuration.GetConnectionString("Database")));
 
         services.AddScoped<INotificationRepository, NotificationRepository>();
-        services.AddScoped<GetNotificationsByUserQueryHandler>();
+
+        services.AddScoped<CreateNotificationCommandHandler>();
+        services.AddScoped<MarkNotificationReadCommandHandler>();
+        services.AddScoped<GetMyNotificationsQueryHandler>();
+        services.AddScoped<GetNotificationByIdQueryHandler>();
 
         services.AddEventBus(configuration);
 

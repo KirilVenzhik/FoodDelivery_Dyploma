@@ -10,6 +10,10 @@ public class ProcessedEventConfiguration : IEntityTypeConfiguration<ProcessedEve
     {
         builder.ToTable("processed_events");
 
-        builder.HasKey(x => x.EventId);
+        builder.HasKey(x => new { x.CorrelationId, x.NotificationType });
+
+        builder.Property(x => x.CorrelationId).HasColumnName("correlation_id");
+        builder.Property(x => x.NotificationType).HasColumnName("notification_type").HasMaxLength(50);
+        builder.Property(x => x.ProcessedAt).HasColumnName("processed_at");
     }
 }

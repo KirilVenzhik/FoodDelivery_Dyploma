@@ -12,20 +12,13 @@ public class NotificationConfiguration : IEntityTypeConfiguration<Notification>
 
         builder.HasKey(x => x.Id);
 
-        builder.Property(x => x.UserId).IsRequired();
-
-        builder.Property(x => x.OrderId).IsRequired();
-
-        builder.Property(x => x.Message)
-            .IsRequired()
-            .HasMaxLength(500);
-
-        builder.Property(x => x.Type)
-            .IsRequired()
-            .HasMaxLength(100);
-
-        builder.Property(x => x.SentAt).IsRequired();
-
-        builder.Property(x => x.CreatedAt).IsRequired();
+        builder.Property(x => x.Id).HasColumnName("id");
+        builder.Property(x => x.UserId).HasColumnName("user_id").IsRequired();
+        builder.Property(x => x.OrderId).HasColumnName("order_id").IsRequired();
+        builder.Property(x => x.Message).HasColumnName("message").IsRequired().HasColumnType("text");
+        builder.Property(x => x.Type).HasColumnName("type").HasConversion<int>();
+        builder.Property(x => x.IsRead).HasColumnName("is_read").IsRequired();
+        builder.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
+        builder.Property(x => x.SentAt).HasColumnName("sent_at");
     }
 }

@@ -7,12 +7,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using NotificationService.Domain.Entities;
+using NotificationService.Application.Commands;
+using NotificationService.Domain.Enums;
 using NotificationService.Infrastructure.Persistence;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
-namespace NotificationService.Infrastructure.BackgroundJobs;
+namespace NotificationService.Infrastructure.Messaging;
 
 public class NotificationRequestedConsumer : BackgroundService
 {
@@ -76,34 +77,48 @@ public class NotificationRequestedConsumer : BackgroundService
 
                 if (evt is null)
                 {
-                    channel.BasicNack(ea.DeliveryTag, false, false);
+                    channel.BasicNack(ea.DeliveryTag, false, requeue: false);
+                    return;
+                }
+
+                if (!Enum.TryParse<NotificationType>(evt.NotificationType, ignoreCase: true, out var notificationType))
+                {
+                    _logger.LogWarning("Unknown NotificationType '{Type}' in event {EventId}. Discarding.",
+                        evt.NotificationType, evt.Id);
+                    channel.BasicNack(ea.DeliveryTag, false, requeue: false);
                     return;
                 }
 
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
 
-                if (await db.ProcessedEvents.AnyAsync(e => e.EventId == evt.Id))
+                var alreadyProcessed = await db.ProcessedEvents.AnyAsync(
+                    e => e.CorrelationId == evt.CorrelationId && e.NotificationType == evt.NotificationType);
+
+                if (alreadyProcessed)
                 {
+                    _logger.LogInformation(
+                        "[Saga:{CorrelationId}] Duplicate notification event '{Type}'. Skipping.",
+                        evt.CorrelationId, evt.NotificationType);
                     channel.BasicAck(ea.DeliveryTag, false);
                     return;
                 }
 
-                var notification = Notification.Create(
-                    evt.UserId,
-                    evt.OrderId,
-                    evt.Message,
-                    evt.NotificationType);
+                var handler = scope.ServiceProvider.GetRequiredService<CreateNotificationCommandHandler>();
 
-                await db.Notifications.AddAsync(notification);
+                using var transaction = await db.Database.BeginTransactionAsync();
+
+                await handler.HandleAsync(new CreateNotificationCommand(evt.UserId, evt.OrderId, notificationType));
 
                 db.ProcessedEvents.Add(new ProcessedEvent
                 {
-                    EventId = evt.Id,
+                    CorrelationId = evt.CorrelationId,
+                    NotificationType = evt.NotificationType,
                     ProcessedAt = DateTime.UtcNow
                 });
 
                 await db.SaveChangesAsync();
+                await transaction.CommitAsync();
 
                 _logger.LogInformation(
                     "[Saga:{CorrelationId}] Notification saved. UserId={UserId}, OrderId={OrderId}, Type={Type}",
@@ -117,7 +132,7 @@ public class NotificationRequestedConsumer : BackgroundService
                     "[Saga:{CorrelationId}] Error processing NotificationRequestedEvent. OrderId={OrderId}",
                     evt?.CorrelationId, evt?.OrderId);
 
-                channel.BasicNack(ea.DeliveryTag, false, true);
+                channel.BasicNack(ea.DeliveryTag, false, requeue: true);
             }
         };
 
