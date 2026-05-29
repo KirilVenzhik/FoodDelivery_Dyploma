@@ -22,15 +22,16 @@ public static class DependencyInjection
 
         services.AddScoped<IDeliveryRepository, DeliveryRepository>();
 
+        services.AddScoped<CreateDeliveryCommandHandler>();
         services.AddScoped<AssignDeliveryCommandHandler>();
-        services.AddScoped<PickupDeliveryCommandHandler>();
+        services.AddScoped<PickUpDeliveryCommandHandler>();
         services.AddScoped<CompleteDeliveryCommandHandler>();
         services.AddScoped<GetDeliveryByIdQueryHandler>();
-        services.AddScoped<GetDeliveriesByCourierQueryHandler>();
+        services.AddScoped<GetMyDeliveriesQueryHandler>();
+        services.AddScoped<GetPendingDeliveriesQueryHandler>();
 
         services.AddEventBus(configuration);
 
-        services.AddHostedService<DeliveryRequestedConsumer>();
         services.AddHostedService<PaymentCompletedConsumer>();
 
         return services;

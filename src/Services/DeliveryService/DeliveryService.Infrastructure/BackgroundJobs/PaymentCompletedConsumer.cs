@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Contracts.Events;
-using DeliveryService.Domain.Entities;
+using DeliveryService.Application.Commands;
 using DeliveryService.Infrastructure.Persistence;
 using EventBus.Options;
 using Microsoft.EntityFrameworkCore;
@@ -83,31 +83,30 @@ public class PaymentCompletedConsumer : BackgroundService
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<DeliveryDbContext>();
 
-                if (await db.ProcessedEvents.AnyAsync(e => e.EventId == evt.Id))
+                if (await db.ProcessedEvents.AnyAsync(e => e.EventId == evt.CorrelationId))
                 {
                     channel.BasicAck(ea.DeliveryTag, false);
                     return;
                 }
 
-                var existingDelivery = await db.Deliveries
-                    .FirstOrDefaultAsync(d => d.OrderId == evt.OrderId);
+                var createHandler = scope.ServiceProvider.GetRequiredService<CreateDeliveryCommandHandler>();
 
-                if (existingDelivery is null)
-                {
-                    var delivery = Delivery.Create(evt.OrderId);
-                    await db.Deliveries.AddAsync(delivery);
-                }
+                await using var transaction = await db.Database.BeginTransactionAsync();
+
+                await createHandler.HandleAsync(
+                    new CreateDeliveryCommand(evt.OrderId, evt.CorrelationId, evt.ClientId, evt.RestaurantId));
 
                 db.ProcessedEvents.Add(new ProcessedEvent
                 {
-                    EventId = evt.Id,
+                    EventId = evt.CorrelationId,
                     ProcessedAt = DateTime.UtcNow
                 });
-
                 await db.SaveChangesAsync();
 
+                await transaction.CommitAsync();
+
                 _logger.LogInformation(
-                    "[Saga:{CorrelationId}] Delivery ensured via PaymentCompleted. OrderId={OrderId}",
+                    "[Saga:{CorrelationId}] Delivery created. OrderId={OrderId}",
                     evt.CorrelationId, evt.OrderId);
 
                 channel.BasicAck(ea.DeliveryTag, false);

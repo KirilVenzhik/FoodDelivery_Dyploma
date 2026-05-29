@@ -1,6 +1,6 @@
+using DeliveryService.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using DeliveryService.Infrastructure.Persistence;
 
 namespace DeliveryService.Infrastructure.Configurations;
 
@@ -11,5 +11,7 @@ public class ProcessedEventConfiguration : IEntityTypeConfiguration<ProcessedEve
         builder.ToTable("processed_events");
 
         builder.HasKey(x => x.EventId);
+        builder.Property(x => x.EventId).HasColumnName("event_id");
+        builder.Property(x => x.ProcessedAt).HasColumnName("processed_at");
     }
 }
