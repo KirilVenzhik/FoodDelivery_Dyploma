@@ -1447,3 +1447,26 @@ All 7 service appsettings updated — `Serilog.MinimumLevel.Default` (services u
 - **YARP `AddTransforms` for correlation forwarding** — avoids modifying `context.Request.Headers` directly (fragile) or hardcoding the header in YARP route config (static). The transform runs after `CorrelationMiddleware` has set `CorrelationContext.CorrelationId`, so the canonical value is always injected.
 - **Underscore cluster/destination IDs kept** — docker-compose uses `ReverseProxy__Clusters__auth_cluster__Destinations__auth_destination__Address` style env vars. Renaming to dashes would require corresponding docker-compose changes with no functional benefit.
 - **Restaurant route split by HTTP method** — single YARP route cannot be both public (GET) and protected (POST/PATCH/DELETE). Split into two routes matching on `Methods` array; downstream RestaurantService still enforces ownership at the command handler level as a second layer.
+
+---
+
+## Session Progress (2026-05-29, test cleanup)
+
+Branch: `master` (commit `0304a92`)
+
+### Changes
+
+All unit test projects removed from the solution and from disk:
+
+| Deleted project | Location |
+|---|---|
+| `AuthService.Tests` | `tests/AuthService.Tests/` |
+| `OrderService.Tests` | `tests/OrderService.Tests/` |
+| `PaymentService.Tests` | `tests/PaymentService.Tests/` |
+| `OrderService.Tests` | `src/Services/OrderService/OrderService.Tests/` |
+| `RestaurantService.Tests` | `src/Services/RestaurantService/RestaurantService.Tests/` |
+| `PaymentService.Tests` | `src/Services/PaymentService/PaymentService.Tests/` |
+| `DeliveryService.Tests` | `src/Services/DeliveryService/DeliveryService.Tests/` |
+| `NotificationService.Tests` | `src/Services/NotificationService/NotificationService.Tests/` |
+
+All project references removed from `FoodDelivery.sln` via `dotnet sln remove`. The `tests/` solution folder was also removed. `dotnet build FoodDelivery.sln` — 0 errors, 0 warnings after removal.
