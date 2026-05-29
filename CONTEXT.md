@@ -27,7 +27,7 @@ food-delivery-dyploma/
         ├── RestaurantService/    — complete, production quality ✅
         ├── OrderService/         — complete, production quality ✅
         ├── PaymentService/       — complete, production quality ✅
-        ├── NotificationService/  — complete (event-driven only) ✅
+        ├── NotificationService/  — complete, production quality ✅
         └── DeliveryService/      — complete, production quality ✅
 ```
 
@@ -1233,3 +1233,149 @@ Admin returns `DeliveryResponse`; unknown id → `DeliveryNotFoundException`; Cu
 - **Handler check → domain guard layering** — `AssignDeliveryCommandHandler` checks `Status != Pending` → throws `DeliveryAlreadyAssignedException` (user-facing 409) before calling `delivery.Assign()` which throws `InvalidDeliveryStatusTransitionException` (domain invariant guard). The user gets a specific error message; the aggregate never enters an inconsistent state regardless.
 - **Publish before SaveChanges in `CompleteDeliveryCommandHandler`** — spec defines this order. Trade-off: if `SaveChangesAsync` fails after publish, the integration event is orphaned. For MVP this is acceptable; production would use outbox.
 - **`GetDeliveryByIdQuery` role-based access** — Customer checks `ClientId`, Courier checks `CourierId`, all other roles (Admin, RestaurantManager) pass through without checks. This follows the same pattern established in PaymentService and OrderService.
+
+---
+
+## Session Progress (2026-05-29, NotificationService production polish)
+
+Branch: `master` (commits `231a93c`, `9194141`, `903190d`, `c45749a`, `9850099`)
+
+### Goal
+Polish NotificationService to production quality. Previous implementation was skeletal:
+the `Notification` entity had no `IsRead`, used `string` for type (instead of an enum),
+had non-nullable `SentAt`, no domain events, and no state-transition methods. The Application
+layer had only one query handler (no commands, no `GetById`). The consumer created entities
+directly (bypassing Application layer) and keyed idempotency on a single `EventId` UUID.
+The API had only one endpoint and no `ExceptionHandlingMiddleware`.
+
+### Changes — Domain Layer (`NotificationService.Domain`)
+
+**New: `Enums/NotificationType.cs`:** `OrderPlaced=0, PaymentSuccess=1, PaymentFailed=2, OrderDelivered=3`.
+
+**`Notification` aggregate — complete rewrite:**
+- Added `IsRead (bool)` — set to `false` in `Create()`
+- Changed `Type` from `string` → `NotificationType` enum
+- `SentAt (DateTime?)` — now nullable; was previously non-nullable and set in `Create()`; now only set by `MarkAsSent()`
+- `Create(userId, orderId, message, type)` — raises `NotificationCreatedDomainEvent`
+- New: `MarkAsSent()` — sets `SentAt = UtcNow`; raises `NotificationSentDomainEvent`
+- New: `MarkAsRead()` — sets `IsRead = true`; raises `NotificationReadDomainEvent`
+
+**New: `Events/` folder (3 files):** all are `sealed class : DomainEvent`:
+- `NotificationCreatedDomainEvent(NotificationId, UserId, OrderId, Type)`
+- `NotificationSentDomainEvent(NotificationId, UserId)`
+- `NotificationReadDomainEvent(NotificationId, UserId)`
+
+**New: `Exceptions/NotificationNotFoundException.cs`:** thrown by query/command handlers on missing notification → 404.
+
+**New: `ValueObjects/NotificationMessage.cs`:** static helper with 4 factory methods:
+- `ForOrderPlaced(orderId)`, `ForPaymentSuccess(orderId)`, `ForPaymentFailed(orderId)`, `ForOrderDelivered(orderId)`
+- Consumer calls these to build message text from `NotificationType`; `evt.Message` from the contract is ignored (option B).
+
+### Changes — Application Layer (`NotificationService.Application`)
+
+**`NotificationResponse` DTO:** added `IsRead (bool)` and `SentAt (DateTime?)`; `Type` stays `string` for JSON.
+
+**`INotificationRepository`:** added `GetByIdAsync(Guid id, CancellationToken)`.
+
+**New: `Commands/CreateNotificationCommand.cs`:**
+- `CreateNotificationCommand(UserId, OrderId, NotificationType)` + handler
+- Builds message text via `NotificationMessage` switch on `Type`
+- Calls `Notification.Create()` then `notification.MarkAsSent()`
+- Calls `AddAsync` + `SaveChangesAsync`; returns `NotificationResponse`
+- Internal static `ToResponse(Notification)` reused by all handlers and query handlers
+
+**New: `Commands/MarkNotificationReadCommand.cs`:**
+- `MarkNotificationReadCommand(NotificationId, RequestingUserId)` + handler
+- Throws `NotificationNotFoundException` if not found; `UnauthorizedAccessException` if ownership mismatch
+- Calls `notification.MarkAsRead()` + `SaveChangesAsync`; returns `NotificationResponse`
+
+**New: `Queries/GetMyNotificationsQuery.cs`:** renamed from `GetNotificationsByUserQuery`; same logic; reuses `ToResponse`.
+
+**New: `Queries/GetNotificationByIdQuery.cs`:**
+- `GetNotificationByIdQuery(NotificationId, RequestingUserId)` + handler
+- Throws `NotificationNotFoundException` / `UnauthorizedAccessException`; returns `NotificationResponse`
+
+**Deleted:** `Common/CommandResult.cs` (stale result-object pattern), `Queries/GetNotificationsByUserQuery.cs` (renamed).
+
+### Changes — Infrastructure Layer (`NotificationService.Infrastructure`)
+
+**`NotificationConfiguration`:** added all `HasColumnName()` in snake_case (`id`, `user_id`, `order_id`, `message`, `order_id`, `type`, `is_read`, `created_at`, `sent_at`); `type` mapped as `int` via `HasConversion<int>()`; `message` as `HasColumnType("text")`; `sent_at` nullable.
+
+**`ProcessedEvent` model:** changed PK from single `EventId (Guid)` to composite `(CorrelationId Guid, NotificationType string)` — allows multiple notification types per saga order (e.g., both `PaymentSuccess` and `OrderDelivered` for the same `CorrelationId`).
+
+**`ProcessedEventConfiguration`:** composite PK `(correlation_id, notification_type)`; snake_case column names.
+
+**`NotificationRepository`:** added `GetByIdAsync` — `FindAsync([id], ct)`.
+
+**`Messaging/NotificationRequestedConsumer`** (moved from `BackgroundJobs/`, complete rewrite):
+- Parses `evt.NotificationType` string → `NotificationType` enum via `Enum.TryParse`; unknown type → nack without requeue
+- Idempotency check: `ProcessedEvents.AnyAsync(e => e.CorrelationId == evt.CorrelationId && e.NotificationType == evt.NotificationType)` — composite key
+- Begins `IDbContextTransaction`; resolves `CreateNotificationCommandHandler` from scope; calls `handler.HandleAsync()`; adds `ProcessedEvent`; calls `db.SaveChangesAsync()`; `transaction.CommitAsync()` — all atomic
+- Parse/null → nack requeue:false; handler exception → nack requeue:true
+
+**`Extensions/DependencyInjection`:** registers `CreateNotificationCommandHandler`, `MarkNotificationReadCommandHandler`, `GetMyNotificationsQueryHandler`, `GetNotificationByIdQueryHandler` (all scoped); removed old `GetNotificationsByUserQueryHandler`.
+
+**New EF migration `RefactorSchema`** (`20260529013433_RefactorSchema`):
+- Renames all `notifications` columns from PascalCase to snake_case
+- Alters `type` from `varchar(100)` → `integer`
+- Alters `message` from `varchar(500)` → `text`
+- Alters `sent_at` from NOT NULL → nullable
+- Adds `is_read (bool NOT NULL)` column
+- Drops `PK_processed_events` on `EventId`; renames `EventId`→`correlation_id`, `ProcessedAt`→`processed_at`; adds `notification_type varchar(50)` column; recreates composite PK `(correlation_id, notification_type)`
+
+### Changes — API Layer (`NotificationService.API`)
+
+**New: `Middlewares/ExceptionHandlingMiddleware.cs`:**
+| Exception | HTTP Status |
+|---|---|
+| `NotificationNotFoundException` | 404 Not Found |
+| `UnauthorizedAccessException` | 403 Forbidden (+ Warning log) |
+| Unhandled `Exception` | 500 Internal Server Error (logged at Error) |
+
+**`NotificationsController` — updated (thin, exception pattern):**
+- `GET /api/notifications [Authorize]` → `GetMyNotificationsQueryHandler` → 200 + `List<NotificationResponse>`
+- `GET /api/notifications/{id:guid} [Authorize]` → `GetNotificationByIdQueryHandler` → 200 + `NotificationResponse` *(new)*
+- `PATCH /api/notifications/{id:guid}/read [Authorize]` → `MarkNotificationReadCommandHandler` → 200 + `NotificationResponse` *(new)*
+
+**`Program.cs`:**
+- Added `builder.Host.UseSerilog(...)` reading from configuration
+- Added `builder.Services.AddAuthServices()` — registers `ICurrentUser`
+- Added `builder.Services.AddCorrelation()`
+- Added `app.UseMiddleware<ExceptionHandlingMiddleware>()`
+- Added `app.UseCorrelation()`
+
+**`appsettings.json`:** added `Serilog` section (Console sink, min level Information).
+
+### Tests — `NotificationService.Tests` (new project, `src/Services/NotificationService/NotificationService.Tests`)
+
+xUnit + Moq + FluentAssertions.
+
+**`NotificationEntityTests.cs` (7 tests):**
+`Create_WithValidData_SetsIsReadFalse`; `Create_WithValidData_SetsSentAtNull`; `Create_RaisesNotificationCreatedDomainEvent`;
+`MarkAsSent_SetsSentAt`; `MarkAsSent_RaisesNotificationSentDomainEvent`;
+`MarkAsRead_SetsIsReadTrue`; `MarkAsRead_RaisesNotificationReadDomainEvent`.
+
+**`NotificationMessageTests.cs` (4 tests):**
+`ForOrderPlaced_ReturnsNonEmptyString`; `ForPaymentSuccess_ReturnsNonEmptyString`;
+`ForPaymentFailed_ReturnsNonEmptyString`; `ForOrderDelivered_ReturnsNonEmptyString`.
+
+**`CreateNotificationCommandHandlerTests.cs` (4 tests):**
+`Handle_OrderPlacedType_CreatesAndPersistsNotification`; `Handle_PaymentSuccessType_CreatesWithCorrectMessage`;
+`Handle_PaymentFailedType_CreatesWithCorrectMessage`; `Handle_CallsMarkAsSent`.
+
+**`MarkNotificationReadCommandHandlerTests.cs` (3 tests):**
+`Handle_OwnNotification_MarksAsRead`; `Handle_UnknownId_ThrowsNotificationNotFoundException`;
+`Handle_OtherUsersNotification_ThrowsUnauthorizedAccessException`.
+
+**`GetMyNotificationsQueryHandlerTests.cs` (2 tests):**
+`Handle_ReturnsUserNotificationsOnly`; `Handle_ReturnsOrderedByCreatedAtDescending`.
+
+### Final state
+- `dotnet build src/Services/NotificationService/NotificationService.API` — 0 errors, 0 warnings
+- `dotnet test src/Services/NotificationService/NotificationService.Tests` — **20/20 passed**
+
+### Key decisions
+- **Option B: consumer builds message from `NotificationType`, ignores `evt.Message`** — `NotificationMessage` static value object is the single source of truth for message text. The `Message` field on `NotificationRequestedEvent` remains for backward compatibility but is not used by the consumer.
+- **Composite idempotency key `(CorrelationId, NotificationType)`** — replaces the single `EventId` UUID. This allows one saga order to generate multiple notification types (`OrderPlaced`, `PaymentSuccess`, etc.) without the second event being treated as a duplicate of the first.
+- **`CreateNotificationCommandHandler.ToResponse()` shared static** — all 4 handlers and both query handlers reuse the same `internal static NotificationResponse ToResponse(Notification n)` method defined on `CreateNotificationCommandHandler`. Avoids duplication without introducing a separate mapper class.
+- **Consumer transaction wraps handler call** — `handler.HandleAsync()` calls `_repository.SaveChangesAsync()` internally (flushes within the open transaction but does not commit), then the consumer adds `ProcessedEvent`, calls `db.SaveChangesAsync()`, and commits — same pattern as DeliveryService and PaymentService consumers.
