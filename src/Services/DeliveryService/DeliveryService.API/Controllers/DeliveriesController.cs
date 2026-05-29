@@ -1,6 +1,5 @@
 using Auth.Abstractions;
 using DeliveryService.Application.Commands;
-using DeliveryService.Application.Common;
 using DeliveryService.Application.Queries;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,51 +12,54 @@ namespace DeliveryService.API.Controllers;
 public class DeliveriesController : ControllerBase
 {
     private readonly AssignDeliveryCommandHandler _assignHandler;
-    private readonly PickupDeliveryCommandHandler _pickupHandler;
+    private readonly PickUpDeliveryCommandHandler _pickUpHandler;
     private readonly CompleteDeliveryCommandHandler _completeHandler;
     private readonly GetDeliveryByIdQueryHandler _getByIdHandler;
-    private readonly GetDeliveriesByCourierQueryHandler _getByCourierHandler;
+    private readonly GetMyDeliveriesQueryHandler _getMyDeliveriesHandler;
+    private readonly GetPendingDeliveriesQueryHandler _getPendingHandler;
     private readonly ICurrentUser _currentUser;
 
     public DeliveriesController(
         AssignDeliveryCommandHandler assignHandler,
-        PickupDeliveryCommandHandler pickupHandler,
+        PickUpDeliveryCommandHandler pickUpHandler,
         CompleteDeliveryCommandHandler completeHandler,
         GetDeliveryByIdQueryHandler getByIdHandler,
-        GetDeliveriesByCourierQueryHandler getByCourierHandler,
+        GetMyDeliveriesQueryHandler getMyDeliveriesHandler,
+        GetPendingDeliveriesQueryHandler getPendingHandler,
         ICurrentUser currentUser)
     {
         _assignHandler = assignHandler;
-        _pickupHandler = pickupHandler;
+        _pickUpHandler = pickUpHandler;
         _completeHandler = completeHandler;
         _getByIdHandler = getByIdHandler;
-        _getByCourierHandler = getByCourierHandler;
+        _getMyDeliveriesHandler = getMyDeliveriesHandler;
+        _getPendingHandler = getPendingHandler;
         _currentUser = currentUser;
     }
 
-    [HttpGet]
+    [HttpGet("pending")]
     [Authorize(Roles = "Courier")]
-    public async Task<IActionResult> GetMyDeliveries(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetPending(CancellationToken cancellationToken)
     {
-        var deliveries = await _getByCourierHandler.HandleAsync(
-            new GetDeliveriesByCourierQuery(_currentUser.UserId), cancellationToken);
+        var result = await _getPendingHandler.HandleAsync(new GetPendingDeliveriesQuery(), cancellationToken);
+        return Ok(result);
+    }
 
-        return Ok(deliveries);
+    [HttpGet("my")]
+    [Authorize(Roles = "Courier")]
+    public async Task<IActionResult> GetMy(CancellationToken cancellationToken)
+    {
+        var result = await _getMyDeliveriesHandler.HandleAsync(
+            new GetMyDeliveriesQuery(_currentUser.UserId), cancellationToken);
+        return Ok(result);
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Roles = "Courier,Administrator")]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
         var result = await _getByIdHandler.HandleAsync(
-            new GetDeliveryByIdQuery(id), cancellationToken);
-
-        return result.Status switch
-        {
-            CommandResultStatus.Success => Ok(result.Value),
-            CommandResultStatus.NotFound => NotFound(),
-            _ => StatusCode(500)
-        };
+            new GetDeliveryByIdQuery(id, _currentUser.UserId, _currentUser.Role), cancellationToken);
+        return Ok(result);
     }
 
     [HttpPatch("{id:guid}/assign")]
@@ -66,47 +68,24 @@ public class DeliveriesController : ControllerBase
     {
         var result = await _assignHandler.HandleAsync(
             new AssignDeliveryCommand(id, _currentUser.UserId), cancellationToken);
-
-        return result.Status switch
-        {
-            CommandResultStatus.Success => NoContent(),
-            CommandResultStatus.NotFound => NotFound(),
-            CommandResultStatus.UnprocessableEntity => UnprocessableEntity(result.Error),
-            _ => StatusCode(500)
-        };
+        return Ok(result);
     }
 
     [HttpPatch("{id:guid}/pickup")]
     [Authorize(Roles = "Courier")]
-    public async Task<IActionResult> Pickup(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> PickUp(Guid id, CancellationToken cancellationToken)
     {
-        var result = await _pickupHandler.HandleAsync(
-            new PickupDeliveryCommand(id, _currentUser.UserId), cancellationToken);
-
-        return result.Status switch
-        {
-            CommandResultStatus.Success => NoContent(),
-            CommandResultStatus.NotFound => NotFound(),
-            CommandResultStatus.Forbidden => Forbid(),
-            CommandResultStatus.UnprocessableEntity => UnprocessableEntity(result.Error),
-            _ => StatusCode(500)
-        };
+        var result = await _pickUpHandler.HandleAsync(
+            new PickUpDeliveryCommand(id, _currentUser.UserId), cancellationToken);
+        return Ok(result);
     }
 
-    [HttpPatch("{id:guid}/deliver")]
+    [HttpPatch("{id:guid}/complete")]
     [Authorize(Roles = "Courier")]
-    public async Task<IActionResult> Deliver(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> Complete(Guid id, CancellationToken cancellationToken)
     {
         var result = await _completeHandler.HandleAsync(
             new CompleteDeliveryCommand(id, _currentUser.UserId), cancellationToken);
-
-        return result.Status switch
-        {
-            CommandResultStatus.Success => NoContent(),
-            CommandResultStatus.NotFound => NotFound(),
-            CommandResultStatus.Forbidden => Forbid(),
-            CommandResultStatus.UnprocessableEntity => UnprocessableEntity(result.Error),
-            _ => StatusCode(500)
-        };
+        return Ok(result);
     }
 }

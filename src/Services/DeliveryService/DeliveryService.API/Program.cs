@@ -1,10 +1,16 @@
+using Auth;
 using Auth.Jwt;
+using DeliveryService.API.Middlewares;
 using DeliveryService.Infrastructure.Extensions;
 using DeliveryService.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
+using Observability.Extensions;
+using Observability.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.ConfigureLogging(builder.Configuration);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -40,6 +46,8 @@ builder.Services.AddSwaggerGen(options =>
 
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddJwtAuthentication(builder.Configuration);
+builder.Services.AddAuthServices();
+builder.Services.AddCorrelation();
 
 var app = builder.Build();
 
@@ -50,6 +58,9 @@ using (var scope = app.Services.CreateScope())
 
 app.UseSwagger();
 app.UseSwaggerUI();
+
+app.UseMiddleware<ExceptionHandlingMiddleware>();
+app.UseCorrelation();
 
 app.UseHttpsRedirection();
 app.UseAuthentication();
