@@ -1680,3 +1680,22 @@ Each has a `GlobalUsings.cs` with `global using Xunit;`.
 - **csproj references** — `AuthService.Tests` references all 3 layers (Domain + Application +
   Infrastructure) because `JwtProviderTests` needs `AuthService.Infrastructure`. The other 3
   test projects reference Domain + Application only (no Infrastructure dependency needed).
+
+### Docker test command (verified)
+
+Run all 47 tests from scratch with one command (Docker Desktop must be running):
+
+```
+docker run --rm -v "${PWD}:/app" -w /app mcr.microsoft.com/dotnet/sdk:9.0 dotnet test FoodDelivery.sln --logger "console;verbosity=minimal"
+```
+
+Run from the repo root (`food-delivery-dyploma/`) in PowerShell. No local .NET SDK required.
+Confirmed output (2026-05-29):
+
+```
+PaymentService.Tests    — Passed:  5, Failed: 0
+OrderService.Tests      — Passed: 13, Failed: 0
+RestaurantService.Tests — Passed: 12, Failed: 0
+AuthService.Tests       — Passed: 17, Failed: 0
+Total                   — Passed: 47, Failed: 0
+```
