@@ -1470,3 +1470,143 @@ All unit test projects removed from the solution and from disk:
 | `NotificationService.Tests` | `src/Services/NotificationService/NotificationService.Tests/` |
 
 All project references removed from `FoodDelivery.sln` via `dotnet sln remove`. The `tests/` solution folder was also removed. `dotnet build FoodDelivery.sln` — 0 errors, 0 warnings after removal.
+
+---
+
+## Session Progress (2026-05-29, audit and remediation)
+
+Branch: `master` (commit `08282de`)
+
+### Goal
+Full audit of the project against diploma FR/NFR and test-case requirements,
+followed by remediation of every finding. No tests existed at session start.
+
+---
+
+### Audit Findings Summary
+
+#### CRITICAL (blocked core business flows)
+
+**C1. UserRole string mismatch** — `AuthService.JwtProvider` emits `"RestaurantOwner"` in JWT role claim,
+but `RestaurantsController` and `OrdersController` had `[Authorize(Roles = "RestaurantManager")]`.
+Restaurant management flow was completely inaccessible in production.
+
+**C2. NotificationType string mismatch** — `OrderService.PaymentCompletedConsumer` sent
+`NotificationType = "PaymentCompleted"` but `NotificationService.NotificationType` enum has
+`PaymentSuccess = 1`. `Enum.TryParse` failed silently; every payment-success notification was
+nacked without requeue and discarded.
+
+**C3. All unit test projects deleted** — commit `0304a92` removed all 8 test projects.
+Diploma requires 47 tests / 78% coverage / 100% pass rate. Count at audit start: 0.
+
+#### HIGH (required flows broken or missing)
+
+**H1. Saga InDelivery gap** — `DeliveryCompletedConsumer` called `order.ChangeStatus(Delivered)`
+but `AllowedTransitions` requires the order to be in `InDelivery` first (not `ReadyForDelivery`).
+The consumer threw `InvalidOrderStatusTransitionException` every time → order could never reach `Delivered`.
+
+**H2. OrderPlaced notification never sent** — `PlaceOrderCommand` had no outbox entry for
+`NotificationType = "OrderPlaced"`. First notification in the saga was missing.
+
+**H3. OrderDelivered notification never sent** — `DeliveryCompletedConsumer` had no outbox entry for
+`NotificationType = "OrderDelivered"`. Last notification in the saga was missing.
+
+**H4. Orphaned `delivery.requested` outbox messages** — `PaymentCompletedConsumer` queued
+`DeliveryRequestedEvent` to routing key `delivery.requested`, but `DeliveryRequestedConsumer`
+was deleted in a prior session. Messages published to an unbound queue are silently dropped by
+RabbitMQ. Delivery creation worked correctly via DeliveryService's own `PaymentCompletedConsumer`
+(which listens to `payment.completed` directly), so this was wasted DB work only.
+
+#### MEDIUM
+
+**M1. Dead code** — `RestaurantService.Application.Common.CommandResult.cs`,
+`PaymentService.Application.Common.CommandResult.cs`, `PaymentService.Application.Common.QueryResult.cs`
+all remained from the old result-object pattern and were never used.
+
+**M2. docker-compose api-gateway** — `depends_on` listed services without `condition` — effectively
+equivalent to `service_started` but lacked the explicit condition key.
+
+---
+
+### Changes Made
+
+#### RestaurantsController.cs — C1 fix
+All 8 `[Authorize(Roles = "RestaurantManager")]` attributes changed to `[Authorize(Roles = "RestaurantOwner")]`
+to match the JWT role claim emitted by `JwtProvider.Generate()`.
+
+#### OrdersController.cs — C1 fix
+`PATCH /api/orders/{id}/status [RestaurantManager]` → `[RestaurantOwner]`.
+
+#### OrderService.Infrastructure/BackgroundJobs/PaymentCompletedConsumer.cs — C2 + H3 + H4
+- `NotificationType = "PaymentCompleted"` → `"PaymentSuccess"` (C2)
+- Removed `DeliveryRequestedEvent` outbox entry block (H4)
+
+#### OrderService.Infrastructure/BackgroundJobs/OutboxPublisherWorker.cs — H4
+Removed `case nameof(DeliveryRequestedEvent)` branch. The `DeliveryRequestedEvent` type is no
+longer enqueued anywhere; keeping the branch would hit `default: LogWarning` on old rows only.
+
+#### OrderService.Infrastructure/BackgroundJobs/DeliveryCompletedConsumer.cs — H1 + H3
+- Two-step transition added: if order is `ReadyForDelivery`, first call `order.ChangeStatus(InDelivery)`,
+  then `order.ChangeStatus(Delivered)`. This traverses the allowed transitions table correctly.
+- Added outbox entry for `NotificationRequestedEvent { NotificationType = "OrderDelivered" }` after
+  the status update.
+- Added `using OrderService.Application.Interfaces` for `IOutboxService`.
+
+#### OrderService.Application/Commands/PlaceOrderCommand.cs — H2
+After the `PaymentRequestedEvent` outbox entry, added a second `SaveMessageAsync` call for
+`NotificationRequestedEvent { NotificationType = "OrderPlaced" }`. Both are committed in the
+same `repository.SaveChangesAsync()` call.
+
+#### Deleted dead code — M1
+- `src/Services/RestaurantService/RestaurantService.Application/Common/CommandResult.cs`
+- `src/Services/PaymentService/PaymentService.Application/Common/CommandResult.cs`
+- `src/Services/PaymentService/PaymentService.Application/Common/QueryResult.cs`
+
+#### docker-compose.yml — M2
+`api-gateway.depends_on` updated to use explicit `condition: service_started` for all 6 services.
+
+---
+
+### Unit Test Projects Recreated — C3
+
+All 6 test projects created under `src/Services/{Name}/{Name}.Tests/` and added to `FoodDelivery.sln`.
+Each project uses xUnit 2.9.2 + Moq 4.20.72 + FluentAssertions 6.12.0 from central package management.
+A `GlobalUsings.cs` with `global using Xunit;` is required in each project (xunit does not add
+namespace to ImplicitUsings automatically).
+
+| Project | Tests | Key classes |
+|---|---|---|
+| `AuthService.Tests` | 26 | `UserEntityTests`(8), `RegisterUserCommandHandlerTests`(5), `LoginUserCommandHandlerTests`(5), `RefreshTokenCommandHandlerTests`(4), `GetCurrentUserQueryHandlerTests`(4) |
+| `OrderService.Tests` | 23 | `OrderAggregateTests`(11), `OrderItemTests`(2), `PlaceOrderCommandHandlerTests`(4), `GetOrderByIdQueryHandlerTests`(3), `ChangeOrderStatusCommandHandlerTests`(3) |
+| `RestaurantService.Tests` | 23 | `RestaurantAggregateTests`(7), `MenuItemTests`(5), `CreateRestaurantCommandHandlerTests`(2), `UpdateRestaurantCommandHandlerTests`(3), `AddMenuItemCommandHandlerTests`(3), `RemoveMenuItemCommandHandlerTests`(3) |
+| `PaymentService.Tests` | 12 | `PaymentEntityTests`(9), `ProcessPaymentCommandHandlerTests`(3) |
+| `DeliveryService.Tests` | 19 | `DeliveryAggregateTests`(13), `AssignDeliveryCommandHandlerTests`(3), `CompleteDeliveryCommandHandlerTests`(3) |
+| `NotificationService.Tests` | 18 | `NotificationEntityTests`(7), `NotificationMessageTests`(4), `CreateNotificationCommandHandlerTests`(4), `MarkNotificationReadCommandHandlerTests`(3) |
+
+**Total: 121 tests, 0 failures** — `dotnet test FoodDelivery.sln` confirmed passing.
+
+---
+
+### Notification Saga — Final Correct Flow
+
+After all fixes, the complete notification saga is:
+
+| Event | NotificationType sent | Matches enum |
+|---|---|---|
+| Order created (`PlaceOrderCommand`) | `"OrderPlaced"` | `OrderPlaced = 0` ✓ |
+| Payment succeeded (`PaymentCompletedConsumer`) | `"PaymentSuccess"` | `PaymentSuccess = 1` ✓ |
+| Payment failed (`PaymentFailedConsumer`) | `"PaymentFailed"` | `PaymentFailed = 2` ✓ |
+| Order delivered (`DeliveryCompletedConsumer`) | `"OrderDelivered"` | `OrderDelivered = 3` ✓ |
+
+---
+
+### Remaining Known Issues (not fixed this session)
+
+- **`PaymentService` never fails**: `ProcessPaymentCommandHandler` always calls `payment.Complete()` —
+  the `Fail()` path and `PaymentFailedEvent` are never triggered end-to-end (MVP design decision).
+  Unit tests for `payment.Fail()` exist at the domain level.
+- **`Cancelled` vs `PaymentFailed` naming**: Diploma test cases TC-10/TC-26 use "Cancelled";
+  implementation uses `OrderStatus.PaymentFailed`. `Cancelled = 7` exists in the enum but is unused.
+  No code change made; this is a documentation-level discrepancy.
+- **No `/health` endpoints**: Services have no `MapHealthChecks` endpoint (NFR 7.1.2 gap).
+- **DataProtection warning**: All services log a warning about keys not persisted outside container — cosmetic, not functional.
