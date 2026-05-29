@@ -1,10 +1,9 @@
-using System.Text.Json;
 using Contracts.Events;
-using OrderService.Application.Common;
 using OrderService.Application.DTOs;
 using OrderService.Application.Interfaces;
+using OrderService.Application.Mapping;
 using OrderService.Domain.Entities;
-using Shared.Primitives;
+using OrderService.Domain.Exceptions;
 
 namespace OrderService.Application.Commands;
 
@@ -14,24 +13,27 @@ public sealed class PlaceOrderCommandHandler
 {
     private readonly IOrderRepository _repository;
     private readonly IRestaurantServiceClient _restaurantClient;
+    private readonly IOutboxService _outboxService;
 
     public PlaceOrderCommandHandler(
         IOrderRepository repository,
-        IRestaurantServiceClient restaurantClient)
+        IRestaurantServiceClient restaurantClient,
+        IOutboxService outboxService)
     {
         _repository = repository;
         _restaurantClient = restaurantClient;
+        _outboxService = outboxService;
     }
 
-    public async Task<CommandResult> HandleAsync(PlaceOrderCommand command, CancellationToken ct = default)
+    public async Task<OrderResponse> HandleAsync(PlaceOrderCommand command, CancellationToken ct = default)
     {
-        var restaurant = await _restaurantClient.GetRestaurantAsync(command.RestaurantId, ct);
+        var restaurant = await _restaurantClient.GetRestaurantWithItemsAsync(command.RestaurantId, ct);
 
         if (restaurant is null)
-            return CommandResult.NotFound("Restaurant not found.");
+            throw new RestaurantValidationException($"Restaurant '{command.RestaurantId}' was not found.");
 
-        if (restaurant.Status != "Open")
-            return CommandResult.UnprocessableEntity("Restaurant is not accepting orders.");
+        if (!restaurant.IsActive)
+            throw new RestaurantValidationException("Restaurant is not currently accepting orders.");
 
         var orderItems = new List<OrderItem>();
 
@@ -40,35 +42,35 @@ public sealed class PlaceOrderCommandHandler
             var menuItem = restaurant.MenuItems.FirstOrDefault(m => m.Id == itemRequest.MenuItemId);
 
             if (menuItem is null)
-                return CommandResult.UnprocessableEntity($"Menu item {itemRequest.MenuItemId} not found.");
+                throw new RestaurantValidationException(
+                    $"Menu item '{itemRequest.MenuItemId}' does not exist in this restaurant.");
 
             if (!menuItem.IsAvailable)
-                return CommandResult.UnprocessableEntity($"Menu item '{menuItem.Name}' is not available.");
+                throw new RestaurantValidationException(
+                    $"Menu item '{menuItem.Name}' is not currently available.");
 
             orderItems.Add(OrderItem.Create(menuItem.Id, menuItem.Name, menuItem.Price, itemRequest.Quantity));
         }
 
-        var order = Order.Create(command.ClientId, command.RestaurantId, orderItems);
-        order.RequestPayment();
-
-        var paymentEvent = new PaymentRequestedEvent
-        {
-            CorrelationId = order.CorrelationId,
-            OrderId = order.Id,
-            ClientId = order.ClientId,
-            Amount = order.TotalAmount
-        };
+        var correlationId = Guid.NewGuid();
+        var order = Order.Create(command.ClientId, command.RestaurantId, orderItems, correlationId);
+        order.StartPayment();
 
         await _repository.AddAsync(order, ct);
-        await _repository.AddOutboxMessageAsync(new OutboxMessage
-        {
-            Id = Guid.NewGuid(),
-            Type = nameof(PaymentRequestedEvent),
-            Payload = JsonSerializer.Serialize(paymentEvent),
-            OccurredOnUtc = DateTime.UtcNow
-        }, ct);
+
+        await _outboxService.SaveMessageAsync(
+            new PaymentRequestedEvent
+            {
+                CorrelationId = order.CorrelationId,
+                OrderId = order.Id,
+                ClientId = order.ClientId,
+                Amount = order.TotalAmount
+            },
+            "payment.requested",
+            ct);
+
         await _repository.SaveChangesAsync(ct);
 
-        return CommandResult.Success(order.Id);
+        return OrderMapper.MapToResponse(order);
     }
 }

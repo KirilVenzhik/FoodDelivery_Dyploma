@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OrderService.Domain.Enums;
 using OrderService.Infrastructure.Persistence;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -44,22 +45,9 @@ public class DeliveryCompletedConsumer : BackgroundService
         var connection = factory.CreateConnection();
         var channel = connection.CreateModel();
 
-        channel.ExchangeDeclare(
-            exchange: _options.ExchangeName,
-            type: ExchangeType.Topic,
-            durable: true);
-
-        channel.QueueDeclare(
-            queue: QueueName,
-            durable: true,
-            exclusive: false,
-            autoDelete: false);
-
-        channel.QueueBind(
-            queue: QueueName,
-            exchange: _options.ExchangeName,
-            routingKey: RoutingKey);
-
+        channel.ExchangeDeclare(exchange: _options.ExchangeName, type: ExchangeType.Topic, durable: true);
+        channel.QueueDeclare(queue: QueueName, durable: true, exclusive: false, autoDelete: false);
+        channel.QueueBind(queue: QueueName, exchange: _options.ExchangeName, routingKey: RoutingKey);
         channel.BasicQos(0, 1, false);
 
         var consumer = new EventingBasicConsumer(channel);
@@ -88,20 +76,12 @@ public class DeliveryCompletedConsumer : BackgroundService
                     return;
                 }
 
-                var order = await db.Orders
-                    .FirstOrDefaultAsync(o => o.Id == evt.OrderId);
+                var order = await db.Orders.FirstOrDefaultAsync(o => o.Id == evt.OrderId);
 
                 if (order is not null)
-                {
-                    order.MarkDelivered();
-                }
+                    order.ChangeStatus(OrderStatus.Delivered);
 
-                db.ProcessedEvents.Add(new ProcessedEvent
-                {
-                    EventId = evt.Id,
-                    ProcessedAt = DateTime.UtcNow
-                });
-
+                db.ProcessedEvents.Add(new ProcessedEvent { EventId = evt.Id, ProcessedAt = DateTime.UtcNow });
                 await db.SaveChangesAsync();
 
                 _logger.LogInformation(
@@ -120,10 +100,7 @@ public class DeliveryCompletedConsumer : BackgroundService
             }
         };
 
-        channel.BasicConsume(
-            queue: QueueName,
-            autoAck: false,
-            consumer: consumer);
+        channel.BasicConsume(queue: QueueName, autoAck: false, consumer: consumer);
 
         stoppingToken.Register(() =>
         {

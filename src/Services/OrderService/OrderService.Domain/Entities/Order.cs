@@ -1,4 +1,5 @@
 using OrderService.Domain.Enums;
+using OrderService.Domain.Events;
 using OrderService.Domain.Exceptions;
 using Shared.Primitives;
 
@@ -6,6 +7,14 @@ namespace OrderService.Domain.Entities;
 
 public class Order : Entity
 {
+    private static readonly Dictionary<OrderStatus, HashSet<OrderStatus>> AllowedTransitions = new()
+    {
+        [OrderStatus.Paid]             = [OrderStatus.InPreparation],
+        [OrderStatus.InPreparation]    = [OrderStatus.ReadyForDelivery],
+        [OrderStatus.ReadyForDelivery] = [OrderStatus.InDelivery],
+        [OrderStatus.InDelivery]       = [OrderStatus.Delivered],
+    };
+
     private readonly List<OrderItem> _items = [];
 
     public Guid Id { get; private set; }
@@ -35,66 +44,87 @@ public class Order : Entity
     public static Order Create(
         Guid clientId,
         Guid restaurantId,
-        IEnumerable<OrderItem> items)
+        IEnumerable<OrderItem> items,
+        Guid correlationId)
     {
+        var itemList = items.ToList();
+
+        if (itemList.Count == 0)
+            throw new OrderItemsEmptyException();
+
         var order = new Order
         {
             Id = Guid.NewGuid(),
-            CorrelationId = Guid.NewGuid(),
+            CorrelationId = correlationId,
             ClientId = clientId,
             RestaurantId = restaurantId,
             Status = OrderStatus.PendingPayment,
             CreatedAtUtc = DateTime.UtcNow
         };
 
-        foreach (var item in items)
-        {
+        foreach (var item in itemList)
             order._items.Add(item);
-        }
 
         order.TotalAmount = order._items.Sum(i => i.LineTotal);
+
+        order.RaiseDomainEvent(new OrderCreatedDomainEvent
+        {
+            OrderId = order.Id,
+            ClientId = order.ClientId,
+            RestaurantId = order.RestaurantId,
+            TotalAmount = order.TotalAmount
+        });
 
         return order;
     }
 
-    public void RequestPayment()
+    public void StartPayment()
     {
+        if (Status != OrderStatus.PendingPayment)
+            throw new InvalidOrderStatusTransitionException(
+                $"Cannot start payment: order is in '{Status}' status, expected 'PendingPayment'.");
+
         PaymentRequested = true;
     }
 
-    public void MarkPaymentCompleted()
+    public void CompletePayment()
     {
-        PaymentCompleted = true;
         Status = OrderStatus.Paid;
+        PaymentCompleted = true;
+
+        RaiseDomainEvent(new OrderPaidDomainEvent
+        {
+            OrderId = Id,
+            ClientId = ClientId
+        });
     }
 
-    public void MarkPaymentFailed()
+    public void FailPayment(string reason)
     {
-        PaymentFailed = true;
         Status = OrderStatus.PaymentFailed;
+        PaymentFailed = true;
+
+        RaiseDomainEvent(new OrderPaymentFailedDomainEvent
+        {
+            OrderId = Id,
+            ClientId = ClientId,
+            Reason = reason
+        });
     }
 
-    public void StartPreparation()
+    public void ChangeStatus(OrderStatus newStatus)
     {
-        if (Status != OrderStatus.Paid)
-            throw new OrderDomainException($"Cannot start preparation: order is in '{Status}' status.");
-        Status = OrderStatus.InPreparation;
-    }
+        if (!AllowedTransitions.TryGetValue(Status, out var allowed) || !allowed.Contains(newStatus))
+            throw new InvalidOrderStatusTransitionException(Status, newStatus);
 
-    public void MarkReadyForDelivery()
-    {
-        if (Status != OrderStatus.InPreparation)
-            throw new OrderDomainException($"Cannot mark ready for delivery: order is in '{Status}' status.");
-        Status = OrderStatus.ReadyForDelivery;
-    }
+        var oldStatus = Status;
+        Status = newStatus;
 
-    public void MarkInDelivery()
-    {
-        Status = OrderStatus.InDelivery;
-    }
-
-    public void MarkDelivered()
-    {
-        Status = OrderStatus.Delivered;
+        RaiseDomainEvent(new OrderStatusChangedDomainEvent
+        {
+            OrderId = Id,
+            OldStatus = oldStatus,
+            NewStatus = newStatus
+        });
     }
 }

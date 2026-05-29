@@ -2,7 +2,6 @@ using Auth.Abstractions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OrderService.Application.Commands;
-using OrderService.Application.Common;
 using OrderService.Application.DTOs;
 using OrderService.Application.Queries;
 
@@ -14,20 +13,20 @@ namespace OrderService.API.Controllers;
 public class OrdersController : ControllerBase
 {
     private readonly PlaceOrderCommandHandler _placeOrderHandler;
-    private readonly UpdateOrderStatusCommandHandler _updateStatusHandler;
+    private readonly ChangeOrderStatusCommandHandler _changeStatusHandler;
     private readonly GetOrderByIdQueryHandler _getByIdHandler;
     private readonly GetOrdersByClientQueryHandler _getByClientHandler;
     private readonly ICurrentUser _currentUser;
 
     public OrdersController(
         PlaceOrderCommandHandler placeOrderHandler,
-        UpdateOrderStatusCommandHandler updateStatusHandler,
+        ChangeOrderStatusCommandHandler changeStatusHandler,
         GetOrderByIdQueryHandler getByIdHandler,
         GetOrdersByClientQueryHandler getByClientHandler,
         ICurrentUser currentUser)
     {
         _placeOrderHandler = placeOrderHandler;
-        _updateStatusHandler = updateStatusHandler;
+        _changeStatusHandler = changeStatusHandler;
         _getByIdHandler = getByIdHandler;
         _getByClientHandler = getByClientHandler;
         _currentUser = currentUser;
@@ -39,36 +38,25 @@ public class OrdersController : ControllerBase
         CreateOrderRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await _placeOrderHandler.HandleAsync(
+        var response = await _placeOrderHandler.HandleAsync(
             new PlaceOrderCommand(_currentUser.UserId, request.RestaurantId, request.Items),
             cancellationToken);
 
-        return result.Status switch
-        {
-            CommandResultStatus.Success => Ok(new { orderId = result.CreatedId }),
-            CommandResultStatus.NotFound => NotFound(result.Error),
-            CommandResultStatus.UnprocessableEntity => UnprocessableEntity(result.Error),
-            _ => StatusCode(500)
-        };
+        return CreatedAtAction(nameof(GetById), new { id = response.Id }, response);
     }
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
-        var result = await _getByIdHandler.HandleAsync(
+        var response = await _getByIdHandler.HandleAsync(
             new GetOrderByIdQuery(id, _currentUser.UserId, _currentUser.Role ?? string.Empty),
             cancellationToken);
 
-        return result.Status switch
-        {
-            CommandResultStatus.Success => Ok(result.Value),
-            CommandResultStatus.NotFound => NotFound(),
-            CommandResultStatus.Forbidden => Forbid(),
-            _ => StatusCode(500)
-        };
+        return Ok(response);
     }
 
     [HttpGet]
+    [Authorize(Roles = "Customer")]
     public async Task<IActionResult> GetMyOrders(CancellationToken cancellationToken)
     {
         var orders = await _getByClientHandler.HandleAsync(
@@ -80,21 +68,15 @@ public class OrdersController : ControllerBase
 
     [HttpPatch("{id:guid}/status")]
     [Authorize(Roles = "RestaurantManager")]
-    public async Task<IActionResult> UpdateStatus(
+    public async Task<IActionResult> ChangeStatus(
         Guid id,
         UpdateOrderStatusRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await _updateStatusHandler.HandleAsync(
-            new UpdateOrderStatusCommand(id, request.Status),
+        var response = await _changeStatusHandler.HandleAsync(
+            new ChangeOrderStatusCommand(id, request.Status),
             cancellationToken);
 
-        return result.Status switch
-        {
-            CommandResultStatus.Success => NoContent(),
-            CommandResultStatus.NotFound => NotFound(),
-            CommandResultStatus.UnprocessableEntity => UnprocessableEntity(result.Error),
-            _ => StatusCode(500)
-        };
+        return Ok(response);
     }
 }

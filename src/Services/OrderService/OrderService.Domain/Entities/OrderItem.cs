@@ -36,4 +36,13 @@ public class OrderItem : Entity
             LineTotal = unitPrice * quantity
         };
     }
+
+    public void UpdateQuantity(int newQuantity)
+    {
+        if (newQuantity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(newQuantity), "Quantity must be positive.");
+
+        Quantity = newQuantity;
+        LineTotal = UnitPrice * newQuantity;
+    }
 }

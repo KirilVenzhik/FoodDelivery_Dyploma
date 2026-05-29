@@ -1,7 +1,7 @@
-using OrderService.Application.Common;
 using OrderService.Application.DTOs;
 using OrderService.Application.Interfaces;
-using OrderService.Domain.Entities;
+using OrderService.Application.Mapping;
+using OrderService.Domain.Exceptions;
 
 namespace OrderService.Application.Queries;
 
@@ -14,34 +14,14 @@ public sealed class GetOrderByIdQueryHandler
     public GetOrderByIdQueryHandler(IOrderRepository repository)
         => _repository = repository;
 
-    public async Task<QueryResult<OrderResponse>> HandleAsync(GetOrderByIdQuery query, CancellationToken ct = default)
+    public async Task<OrderResponse> HandleAsync(GetOrderByIdQuery query, CancellationToken ct = default)
     {
-        var order = await _repository.GetByIdAsync(query.OrderId, ct);
-        if (order is null)
-            return QueryResult<OrderResponse>.NotFound();
+        var order = await _repository.GetByIdAsync(query.OrderId, ct)
+            ?? throw new OrderNotFoundException(query.OrderId);
 
         if (order.ClientId != query.RequesterId && query.RequesterRole != "Administrator")
-            return QueryResult<OrderResponse>.Forbidden();
+            throw new UnauthorizedAccessException("You do not have access to this order.");
 
-        return QueryResult<OrderResponse>.Ok(MapToResponse(order));
+        return OrderMapper.MapToResponse(order);
     }
-
-    internal static OrderResponse MapToResponse(Order order) => new()
-    {
-        Id = order.Id,
-        CorrelationId = order.CorrelationId,
-        ClientId = order.ClientId,
-        RestaurantId = order.RestaurantId,
-        TotalAmount = order.TotalAmount,
-        Status = order.Status.ToString(),
-        CreatedAtUtc = order.CreatedAtUtc,
-        Items = order.Items.Select(i => new OrderItemResponse
-        {
-            MenuItemId = i.MenuItemId,
-            ItemName = i.ItemName,
-            UnitPrice = i.UnitPrice,
-            Quantity = i.Quantity,
-            LineTotal = i.LineTotal
-        }).ToList()
-    };
 }

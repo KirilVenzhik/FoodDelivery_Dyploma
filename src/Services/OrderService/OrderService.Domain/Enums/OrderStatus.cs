@@ -8,5 +8,6 @@ public enum OrderStatus
     ReadyForDelivery = 3,
     InDelivery = 4,
     Delivered = 5,
-    PaymentFailed = 6
+    PaymentFailed = 6,
+    Cancelled = 7
 }

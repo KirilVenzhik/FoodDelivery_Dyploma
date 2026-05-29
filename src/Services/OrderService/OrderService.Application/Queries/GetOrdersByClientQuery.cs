@@ -1,5 +1,6 @@
 using OrderService.Application.DTOs;
 using OrderService.Application.Interfaces;
+using OrderService.Application.Mapping;
 
 namespace OrderService.Application.Queries;
 
@@ -15,6 +16,6 @@ public sealed class GetOrdersByClientQueryHandler
     public async Task<List<OrderResponse>> HandleAsync(GetOrdersByClientQuery query, CancellationToken ct = default)
     {
         var orders = await _repository.GetByClientIdAsync(query.ClientId, ct);
-        return orders.Select(GetOrderByIdQueryHandler.MapToResponse).ToList();
+        return orders.Select(OrderMapper.MapToResponse).ToList();
     }
 }

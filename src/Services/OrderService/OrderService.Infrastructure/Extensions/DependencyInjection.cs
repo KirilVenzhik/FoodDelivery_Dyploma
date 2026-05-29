@@ -9,6 +9,7 @@ using OrderService.Infrastructure.BackgroundJobs;
 using OrderService.Infrastructure.Messaging;
 using OrderService.Infrastructure.Persistence;
 using OrderService.Infrastructure.Repositories;
+using OrderService.Infrastructure.Services;
 
 namespace OrderService.Infrastructure.Extensions;
 
@@ -22,6 +23,7 @@ public static class DependencyInjection
             options.UseNpgsql(configuration.GetConnectionString("Database")));
 
         services.AddScoped<IOrderRepository, OrderRepository>();
+        services.AddScoped<IOutboxService, OutboxService>();
 
         services.AddHttpClient<IRestaurantServiceClient, RestaurantServiceHttpClient>(client =>
         {
@@ -31,7 +33,7 @@ public static class DependencyInjection
         services.AddEventBus(configuration);
 
         services.AddScoped<PlaceOrderCommandHandler>();
-        services.AddScoped<UpdateOrderStatusCommandHandler>();
+        services.AddScoped<ChangeOrderStatusCommandHandler>();
         services.AddScoped<GetOrderByIdQueryHandler>();
         services.AddScoped<GetOrdersByClientQueryHandler>();
 

@@ -7,10 +7,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OrderService.Application.Interfaces;
 using OrderService.Infrastructure.Persistence;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using Shared.Primitives;
 
 namespace OrderService.Infrastructure.BackgroundJobs;
 
@@ -45,22 +45,9 @@ public class PaymentCompletedConsumer : BackgroundService
         var connection = factory.CreateConnection();
         var channel = connection.CreateModel();
 
-        channel.ExchangeDeclare(
-            exchange: _options.ExchangeName,
-            type: ExchangeType.Topic,
-            durable: true);
-
-        channel.QueueDeclare(
-            queue: QueueName,
-            durable: true,
-            exclusive: false,
-            autoDelete: false);
-
-        channel.QueueBind(
-            queue: QueueName,
-            exchange: _options.ExchangeName,
-            routingKey: RoutingKey);
-
+        channel.ExchangeDeclare(exchange: _options.ExchangeName, type: ExchangeType.Topic, durable: true);
+        channel.QueueDeclare(queue: QueueName, durable: true, exclusive: false, autoDelete: false);
+        channel.QueueBind(queue: QueueName, exchange: _options.ExchangeName, routingKey: RoutingKey);
         channel.BasicQos(0, 1, false);
 
         var consumer = new EventingBasicConsumer(channel);
@@ -89,49 +76,33 @@ public class PaymentCompletedConsumer : BackgroundService
                     return;
                 }
 
-                var order = await db.Orders
-                    .FirstOrDefaultAsync(o => o.Id == evt.OrderId);
+                var order = await db.Orders.FirstOrDefaultAsync(o => o.Id == evt.OrderId);
 
                 if (order is not null)
                 {
-                    order.MarkPaymentCompleted();
+                    order.CompletePayment();
 
-                    db.OutboxMessages.Add(new OutboxMessage
-                    {
-                        Id = Guid.NewGuid(),
-                        Type = nameof(NotificationRequestedEvent),
-                        Payload = JsonSerializer.Serialize(new NotificationRequestedEvent
-                        {
-                            CorrelationId = evt.CorrelationId,
-                            UserId = order.ClientId,
-                            OrderId = order.Id,
-                            Message = $"Payment successful. Your order is being prepared.",
-                            NotificationType = "PaymentCompleted"
-                        }),
-                        OccurredOnUtc = DateTime.UtcNow
-                    });
+                    var outbox = scope.ServiceProvider.GetRequiredService<IOutboxService>();
 
-                    db.OutboxMessages.Add(new OutboxMessage
+                    await outbox.SaveMessageAsync(new NotificationRequestedEvent
                     {
-                        Id = Guid.NewGuid(),
-                        Type = nameof(DeliveryRequestedEvent),
-                        Payload = JsonSerializer.Serialize(new DeliveryRequestedEvent
-                        {
-                            CorrelationId = evt.CorrelationId,
-                            OrderId = order.Id,
-                            ClientId = order.ClientId,
-                            RestaurantId = order.RestaurantId
-                        }),
-                        OccurredOnUtc = DateTime.UtcNow
-                    });
+                        CorrelationId = evt.CorrelationId,
+                        UserId = order.ClientId,
+                        OrderId = order.Id,
+                        Message = "Payment successful. Your order is being prepared.",
+                        NotificationType = "PaymentCompleted"
+                    }, "notification.requested");
+
+                    await outbox.SaveMessageAsync(new DeliveryRequestedEvent
+                    {
+                        CorrelationId = evt.CorrelationId,
+                        OrderId = order.Id,
+                        ClientId = order.ClientId,
+                        RestaurantId = order.RestaurantId
+                    }, "delivery.requested");
                 }
 
-                db.ProcessedEvents.Add(new ProcessedEvent
-                {
-                    EventId = evt.Id,
-                    ProcessedAt = DateTime.UtcNow
-                });
-
+                db.ProcessedEvents.Add(new ProcessedEvent { EventId = evt.Id, ProcessedAt = DateTime.UtcNow });
                 await db.SaveChangesAsync();
 
                 _logger.LogInformation(
@@ -150,10 +121,7 @@ public class PaymentCompletedConsumer : BackgroundService
             }
         };
 
-        channel.BasicConsume(
-            queue: QueueName,
-            autoAck: false,
-            consumer: consumer);
+        channel.BasicConsume(queue: QueueName, autoAck: false, consumer: consumer);
 
         stoppingToken.Register(() =>
         {

@@ -4,7 +4,7 @@ namespace OrderService.Application.Interfaces;
 
 public interface IRestaurantServiceClient
 {
-    Task<RestaurantDto?> GetRestaurantAsync(
+    Task<RestaurantDto?> GetRestaurantWithItemsAsync(
         Guid restaurantId,
         CancellationToken cancellationToken = default);
 }

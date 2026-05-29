@@ -9,4 +9,6 @@ public sealed class RestaurantDto
     public string Status { get; set; } = default!;
 
     public List<MenuItemDto> MenuItems { get; set; } = [];
+
+    public bool IsActive => Status == "Open";
 }
