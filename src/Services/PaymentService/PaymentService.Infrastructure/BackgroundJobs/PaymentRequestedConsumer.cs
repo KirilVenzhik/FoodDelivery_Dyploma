@@ -1,14 +1,14 @@
 using System.Text;
 using System.Text.Json;
 using Contracts.Events;
-using EventBus.Abstractions;
 using EventBus.Options;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using PaymentService.Domain.Entities;
+using PaymentService.Application.Commands;
+using PaymentService.Domain.Exceptions;
 using PaymentService.Infrastructure.Persistence;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -18,7 +18,6 @@ namespace PaymentService.Infrastructure.BackgroundJobs;
 public class PaymentRequestedConsumer : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IEventBus _eventBus;
     private readonly RabbitMqOptions _options;
     private readonly ILogger<PaymentRequestedConsumer> _logger;
 
@@ -27,12 +26,10 @@ public class PaymentRequestedConsumer : BackgroundService
 
     public PaymentRequestedConsumer(
         IServiceScopeFactory scopeFactory,
-        IEventBus eventBus,
         IOptions<RabbitMqOptions> options,
         ILogger<PaymentRequestedConsumer> logger)
     {
         _scopeFactory = scopeFactory;
-        _eventBus = eventBus;
         _options = options.Value;
         _logger = logger;
     }
@@ -86,68 +83,49 @@ public class PaymentRequestedConsumer : BackgroundService
 
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<PaymentDbContext>();
+                var handler = scope.ServiceProvider.GetRequiredService<ProcessPaymentCommandHandler>();
 
-                if (await db.ProcessedEvents.AnyAsync(e => e.EventId == evt.Id))
+                await using var transaction = await db.Database.BeginTransactionAsync(stoppingToken);
+
+                if (await db.ProcessedEvents.AnyAsync(e => e.EventId == evt.Id, stoppingToken))
                 {
+                    _logger.LogInformation(
+                        "[Saga:{CorrelationId}] Duplicate event ignored. EventId={EventId}",
+                        evt.CorrelationId, evt.Id);
+
+                    await transaction.RollbackAsync(stoppingToken);
                     channel.BasicAck(ea.DeliveryTag, false);
                     return;
                 }
 
-                var payment = Payment.Create(evt.OrderId, evt.CorrelationId, evt.Amount);
+                var command = new ProcessPaymentCommand(
+                    evt.OrderId,
+                    evt.CorrelationId,
+                    evt.ClientId,
+                    evt.Amount);
 
-                var success = Random.Shared.Next(0, 2) == 1;
+                await handler.HandleAsync(command, stoppingToken);
 
-                if (success)
+                db.ProcessedEvents.Add(new ProcessedEvent
                 {
-                    payment.Complete();
+                    EventId = evt.Id,
+                    ProcessedAt = DateTime.UtcNow
+                });
+                await db.SaveChangesAsync(stoppingToken);
 
-                    await db.Payments.AddAsync(payment);
-                    db.ProcessedEvents.Add(new ProcessedEvent
-                    {
-                        EventId = evt.Id,
-                        ProcessedAt = DateTime.UtcNow
-                    });
-                    await db.SaveChangesAsync();
+                await transaction.CommitAsync(stoppingToken);
 
-                    await _eventBus.PublishAsync(
-                        new PaymentCompletedEvent
-                        {
-                            CorrelationId = evt.CorrelationId,
-                            OrderId = evt.OrderId,
-                            PaymentId = payment.Id,
-                            Amount = evt.Amount
-                        },
-                        "payment.completed");
+                _logger.LogInformation(
+                    "[Saga:{CorrelationId}] Payment processed. OrderId={OrderId}",
+                    evt.CorrelationId, evt.OrderId);
 
-                    _logger.LogInformation(
-                        "[Saga:{CorrelationId}] Payment completed. OrderId={OrderId}, PaymentId={PaymentId}",
-                        evt.CorrelationId, evt.OrderId, payment.Id);
-                }
-                else
-                {
-                    payment.Fail();
-
-                    await db.Payments.AddAsync(payment);
-                    db.ProcessedEvents.Add(new ProcessedEvent
-                    {
-                        EventId = evt.Id,
-                        ProcessedAt = DateTime.UtcNow
-                    });
-                    await db.SaveChangesAsync();
-
-                    await _eventBus.PublishAsync(
-                        new PaymentFailedEvent
-                        {
-                            CorrelationId = evt.CorrelationId,
-                            OrderId = evt.OrderId,
-                            Reason = "Payment declined by processor."
-                        },
-                        "payment.failed");
-
-                    _logger.LogWarning(
-                        "[Saga:{CorrelationId}] Payment failed. OrderId={OrderId}",
-                        evt.CorrelationId, evt.OrderId);
-                }
+                channel.BasicAck(ea.DeliveryTag, false);
+            }
+            catch (DuplicatePaymentException ex)
+            {
+                _logger.LogWarning(
+                    "[Saga:{CorrelationId}] {Message}",
+                    evt?.CorrelationId, ex.Message);
 
                 channel.BasicAck(ea.DeliveryTag, false);
             }

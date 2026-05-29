@@ -10,9 +10,7 @@ public class PaymentRepository : IPaymentRepository
     private readonly PaymentDbContext _dbContext;
 
     public PaymentRepository(PaymentDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
+        => _dbContext = dbContext;
 
     public async Task AddAsync(
         Payment payment,
@@ -27,6 +25,14 @@ public class PaymentRepository : IPaymentRepository
     {
         return await _dbContext.Payments
             .FirstOrDefaultAsync(p => p.OrderId == orderId, cancellationToken);
+    }
+
+    public async Task<Payment?> GetByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Payments
+            .FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
     }
 
     public async Task SaveChangesAsync(
