@@ -1,0 +1,94 @@
+@page "/customer/orders/{Id:guid}"
+@attribute [Authorize(Roles = "Customer")]
+@implements IDisposable
+@inject OrderApiClient OrderApi
+@inject ISnackbar Snackbar
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-6">
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else if (_order is null)
+    {
+        <MudText Color="Color.Error">Order not found.</MudText>
+    }
+    else
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudText Typo="Typo.h5">Order @_order.Id.ToString("D")[..8]…</MudText>
+            <MudChip T="string" Color="@StatusColor(_order.Status)" Size="Size.Small">@_order.Status</MudChip>
+        </MudStack>
+
+        <MudTable T="OrderItemResponse" Items="@_order.Items" Dense="true" Class="mb-4">
+            <HeaderContent>
+                <MudTh>Item</MudTh>
+                <MudTh>Qty</MudTh>
+                <MudTh>Unit Price</MudTh>
+                <MudTh>Line Total</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.ItemName</MudTd>
+                <MudTd>@context.Quantity</MudTd>
+                <MudTd>€@context.UnitPrice.ToString("0.00")</MudTd>
+                <MudTd>€@context.LineTotal.ToString("0.00")</MudTd>
+            </RowTemplate>
+        </MudTable>
+
+        <MudText Typo="Typo.subtitle1" Class="mb-1">
+            <strong>Total: €@_order.TotalAmount.ToString("0.00")</strong>
+        </MudText>
+        <MudText Typo="Typo.caption">
+            Placed: @_order.CreatedAt.ToLocalTime().ToString("g") · Auto-refreshing every 5 s
+        </MudText>
+    }
+</MudContainer>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private OrderResponse? _order;
+    private bool _loading = true;
+    private Timer? _timer;
+
+    private static readonly HashSet<string> TerminalStatuses =
+        new(StringComparer.OrdinalIgnoreCase) { "Delivered", "Completed", "Failed", "Cancelled", "PaymentFailed" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadOrderAsync();
+        _loading = false;
+        _timer = new Timer(async _ =>
+        {
+            await LoadOrderAsync();
+            await InvokeAsync(StateHasChanged);
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private async Task LoadOrderAsync()
+    {
+        var order = await OrderApi.GetOrderAsync(Id);
+        if (order is not null)
+        {
+            _order = order;
+            if (TerminalStatuses.Contains(order.Status))
+                _timer?.Change(Timeout.Infinite, Timeout.Infinite);
+        }
+        else if (_order is null)
+        {
+            Snackbar.Add("Order not found.", Severity.Error);
+        }
+    }
+
+    public void Dispose() => _timer?.Dispose();
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "Paid" or "Completed" or "Delivered" => Color.Success,
+        "PaymentFailed" or "Failed" or "Cancelled" => Color.Error,
+        "PendingPayment" or "Pending" => Color.Warning,
+        "InPreparation" or "InProgress" => Color.Info,
+        "ReadyForDelivery" or "InDelivery" => Color.Primary,
+        _ => Color.Default
+    };
+}

@@ -1,0 +1,68 @@
+@page "/customer/orders"
+@attribute [Authorize(Roles = "Customer")]
+@inject OrderApiClient OrderApi
+@inject ISnackbar Snackbar
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="mt-6">
+    <MudText Typo="Typo.h5" GutterBottom="true">My Orders</MudText>
+
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else if (_orders is null || _orders.Count == 0)
+    {
+        <MudText>No orders yet.</MudText>
+    }
+    else
+    {
+        <MudTable T="OrderResponse" Items="@_orders" Hover="true" Dense="true">
+            <HeaderContent>
+                <MudTh>Date</MudTh>
+                <MudTh>Order ID</MudTh>
+                <MudTh>Total</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.CreatedAt.ToLocalTime().ToString("g")</MudTd>
+                <MudTd>@context.Id.ToString("D")[..8]…</MudTd>
+                <MudTd>€@context.TotalAmount.ToString("0.00")</MudTd>
+                <MudTd>
+                    <MudChip T="string" Color="@StatusColor(context.Status)" Size="Size.Small">
+                        @context.Status
+                    </MudChip>
+                </MudTd>
+                <MudTd>
+                    <MudButton Href="@($"/customer/orders/{context.Id}")"
+                               Variant="Variant.Text" Color="Color.Primary" Size="Size.Small">
+                        View
+                    </MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudContainer>
+
+@code {
+    private List<OrderResponse>? _orders;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _orders = await OrderApi.GetOrdersAsync();
+        if (_orders is null)
+            Snackbar.Add("Failed to load orders.", Severity.Error);
+        _loading = false;
+    }
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "Paid" or "Completed" or "Delivered" => Color.Success,
+        "PaymentFailed" or "Failed" or "Cancelled" => Color.Error,
+        "PendingPayment" or "Pending" => Color.Warning,
+        "InPreparation" or "InProgress" => Color.Info,
+        "ReadyForDelivery" or "InDelivery" => Color.Primary,
+        _ => Color.Default
+    };
+}
