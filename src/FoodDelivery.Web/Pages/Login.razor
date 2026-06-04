@@ -1,0 +1,43 @@
+@page "/login"
+@inject IAuthService Auth
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<MudContainer MaxWidth="MaxWidth.ExtraSmall" Class="mt-16">
+    <MudPaper Class="pa-8" Elevation="2">
+        <MudText Typo="Typo.h5" GutterBottom="true">Login</MudText>
+        <MudForm @ref="_form">
+            <MudTextField @bind-Value="_email" Label="Email" Required="true"
+                          InputType="InputType.Email" Class="mb-3" />
+            <MudTextField @bind-Value="_password" Label="Password" Required="true"
+                          InputType="InputType.Password" Class="mb-4" />
+            <MudButton OnClick="Submit" Disabled="_busy" Variant="Variant.Filled"
+                       Color="Color.Primary" FullWidth="true">
+                @(_busy ? "Signing in…" : "Login")
+            </MudButton>
+        </MudForm>
+        <MudText Typo="Typo.body2" Class="mt-4">
+            No account? <MudLink Href="/register">Register</MudLink>
+        </MudText>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private MudForm _form = null!;
+    private string _email = "";
+    private string _password = "";
+    private bool _busy;
+
+    private async Task Submit()
+    {
+        _busy = true;
+        var result = await Auth.LoginAsync(_email, _password);
+        _busy = false;
+        if (result is null)
+        {
+            Snackbar.Add("Invalid email or password.", Severity.Error);
+            return;
+        }
+        Nav.NavigateTo(RoleRoutes.HomeFor(result.Role));
+    }
+}
