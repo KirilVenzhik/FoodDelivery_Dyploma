@@ -43,6 +43,7 @@ adds only the methods its pages need; if two need the same client, Phase 1 stubs
   `builder.Services.AddScoped<RestaurantApiClient>();`
   `builder.Services.AddScoped<OrderApiClient>();`
   `builder.Services.AddScoped<NotificationApiClient>();`
+- **Session 2b (Owner):** Uses `RestaurantApiClient` and `OrderApiClient` — already registered by 2a. No additional registrations needed.
 - **Session 2c (Courier):** `builder.Services.AddScoped<DeliveryApiClient>();`
 
 ## Session log

@@ -1,0 +1,43 @@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Edit Menu Item</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Required="true" Class="mb-3" />
+        <MudTextField @bind-Value="_description" Label="Description" Class="mb-3" />
+        <MudNumericField T="decimal" @bind-Value="_price" Label="Price (€)" Format="F2" Class="mb-3" />
+        <MudSwitch T="bool" @bind-Value="_available" Label="Available" Color="Color.Success" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" OnClick="Submit">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public MenuItemResponse Item { get; set; } = null!;
+
+    private string _name = "";
+    private string _description = "";
+    private decimal _price;
+    private bool _available;
+
+    protected override void OnInitialized()
+    {
+        _name = Item.Name;
+        _description = Item.Description;
+        _price = Item.Price;
+        _available = Item.Available;
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_name) || _price <= 0)
+            return;
+        MudDialog.Close(DialogResult.Ok(new UpdateMenuItemRequest(_name, _description, _price, _available)));
+    }
+}

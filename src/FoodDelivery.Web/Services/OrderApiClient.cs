@@ -16,4 +16,7 @@ public class OrderApiClient : ApiClient
 
     public Task<OrderResponse?> CreateOrderAsync(CreateOrderRequest request) =>
         PostAsync<OrderResponse>("/api/orders", request);
+
+    public Task<OrderResponse?> ChangeStatusAsync(Guid id, string newStatus) =>
+        PatchAsync<OrderResponse>($"/api/orders/{id}/status", new ChangeOrderStatusRequest(newStatus));
 }
