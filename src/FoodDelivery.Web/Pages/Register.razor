@@ -1,0 +1,48 @@
+@page "/register"
+@inject IAuthService Auth
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<MudContainer MaxWidth="MaxWidth.ExtraSmall" Class="mt-16">
+    <MudPaper Class="pa-8" Elevation="2">
+        <MudText Typo="Typo.h5" GutterBottom="true">Register</MudText>
+        <MudForm>
+            <MudTextField @bind-Value="_email" Label="Email" Required="true"
+                          InputType="InputType.Email" Class="mb-3" />
+            <MudTextField @bind-Value="_password" Label="Password" Required="true"
+                          InputType="InputType.Password" Class="mb-3" />
+            <MudSelect @bind-Value="_role" Label="Role" Required="true" Class="mb-4">
+                <MudSelectItem Value="@("Customer")">Customer</MudSelectItem>
+                <MudSelectItem Value="@("RestaurantOwner")">Restaurant Owner</MudSelectItem>
+                <MudSelectItem Value="@("Courier")">Courier</MudSelectItem>
+            </MudSelect>
+            <MudButton OnClick="Submit" Disabled="_busy" Variant="Variant.Filled"
+                       Color="Color.Primary" FullWidth="true">
+                @(_busy ? "Creating…" : "Register")
+            </MudButton>
+        </MudForm>
+        <MudText Typo="Typo.body2" Class="mt-4">
+            Have an account? <MudLink Href="/login">Login</MudLink>
+        </MudText>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private string _email = "";
+    private string _password = "";
+    private string _role = "Customer";
+    private bool _busy;
+
+    private async Task Submit()
+    {
+        _busy = true;
+        var result = await Auth.RegisterAsync(_email, _password, _role);
+        _busy = false;
+        if (result is null)
+        {
+            Snackbar.Add("Registration failed.", Severity.Error);
+            return;
+        }
+        Nav.NavigateTo(RoleRoutes.HomeFor(result.Role));
+    }
+}

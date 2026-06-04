@@ -1,0 +1,38 @@
+@page "/account"
+@attribute [Authorize]
+@inject IAuthService Auth
+@inject NavigationManager Nav
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-10">
+    <MudPaper Class="pa-8" Elevation="2">
+        <MudText Typo="Typo.h5" GutterBottom="true">Account</MudText>
+        @if (_user is null)
+        {
+            <MudProgressCircular Indeterminate="true" />
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Bordered="false" Striped="true">
+                <tbody>
+                    <tr><td>User ID</td><td>@_user.UserId</td></tr>
+                    <tr><td>Email</td><td>@_user.Email</td></tr>
+                    <tr><td>Role</td><td>@_user.Role</td></tr>
+                </tbody>
+            </MudSimpleTable>
+        }
+        <MudButton OnClick="Logout" Variant="Variant.Outlined" Color="Color.Error"
+                   StartIcon="@Icons.Material.Filled.Logout" Class="mt-6">Logout</MudButton>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private UserDto? _user;
+
+    protected override async Task OnInitializedAsync() => _user = await Auth.GetCurrentUserAsync();
+
+    private async Task Logout()
+    {
+        await Auth.LogoutAsync();
+        Nav.NavigateTo("/login");
+    }
+}
