@@ -1,0 +1,60 @@
+@page "/customer/restaurants"
+@attribute [Authorize(Roles = "Customer")]
+@inject RestaurantApiClient RestaurantApi
+@inject ISnackbar Snackbar
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="mt-6">
+    <MudText Typo="Typo.h5" GutterBottom="true">Restaurants</MudText>
+
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else if (_restaurants is null || _restaurants.Count == 0)
+    {
+        <MudText>No restaurants available.</MudText>
+    }
+    else
+    {
+        <MudGrid>
+            @foreach (var r in _restaurants)
+            {
+                <MudItem xs="12" sm="6" md="4">
+                    <MudCard>
+                        <MudCardContent>
+                            <MudText Typo="Typo.h6">@r.Name</MudText>
+                            <MudText Typo="Typo.body2" Class="mb-2">@r.Address</MudText>
+                            <MudChip T="string" Color="@StatusColor(r.Status)" Size="Size.Small">@r.Status</MudChip>
+                        </MudCardContent>
+                        <MudCardActions>
+                            <MudButton Href="@($"/customer/restaurants/{r.Id}")"
+                                       Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small">
+                                View Menu
+                            </MudButton>
+                        </MudCardActions>
+                    </MudCard>
+                </MudItem>
+            }
+        </MudGrid>
+    }
+</MudContainer>
+
+@code {
+    private List<RestaurantSummaryResponse>? _restaurants;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _restaurants = await RestaurantApi.GetRestaurantsAsync();
+        if (_restaurants is null)
+            Snackbar.Add("Failed to load restaurants.", Severity.Error);
+        _loading = false;
+    }
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "Open" => Color.Success,
+        "Closed" => Color.Error,
+        _ => Color.Default
+    };
+}

@@ -1,0 +1,152 @@
+@page "/customer/restaurants/{Id:guid}"
+@attribute [Authorize(Roles = "Customer")]
+@inject RestaurantApiClient RestaurantApi
+@inject OrderApiClient OrderApi
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="mt-6">
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else if (_restaurant is null)
+    {
+        <MudText Color="Color.Error">Restaurant not found.</MudText>
+    }
+    else
+    {
+        <MudText Typo="Typo.h5" GutterBottom="true">@_restaurant.Name</MudText>
+        <MudText Typo="Typo.body2" Class="mb-1">@_restaurant.Address</MudText>
+        <MudChip T="string" Color="@StatusColor(_restaurant.Status)" Size="Size.Small" Class="mb-4">@_restaurant.Status</MudChip>
+
+        <MudGrid>
+            <MudItem xs="12" md="8">
+                <MudText Typo="Typo.h6" GutterBottom="true">Menu</MudText>
+                <MudTable T="MenuItemResponse" Items="@_restaurant.MenuItems" Hover="true" Dense="true">
+                    <HeaderContent>
+                        <MudTh>Item</MudTh>
+                        <MudTh>Description</MudTh>
+                        <MudTh>Price</MudTh>
+                        <MudTh>Status</MudTh>
+                        <MudTh></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@context.Name</MudTd>
+                        <MudTd>@context.Description</MudTd>
+                        <MudTd>€@context.Price.ToString("0.00")</MudTd>
+                        <MudTd>
+                            <MudChip T="string" Color="@(context.Available ? Color.Success : Color.Default)" Size="Size.Small">
+                                @(context.Available ? "Available" : "Unavailable")
+                            </MudChip>
+                        </MudTd>
+                        <MudTd>
+                            @if (context.Available)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.AddShoppingCart"
+                                               Color="Color.Primary"
+                                               OnClick="() => AddToCart(context)" />
+                            }
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            </MudItem>
+
+            <MudItem xs="12" md="4">
+                <MudPaper Class="pa-4" Elevation="2">
+                    <MudText Typo="Typo.h6" GutterBottom="true">Cart</MudText>
+                    @if (_cart.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2">Your cart is empty.</MudText>
+                    }
+                    else
+                    {
+                        @foreach (var entry in _cart)
+                        {
+                            var menuItem = GetCartItem(entry.Key);
+                            if (menuItem is not null)
+                            {
+                                <MudStack Row="true" Class="mb-1" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                    <MudText>@menuItem.Name ×@entry.Value</MudText>
+                                    <MudStack Row="true" AlignItems="AlignItems.Center">
+                                        <MudText>€@((menuItem.Price * entry.Value).ToString("0.00"))</MudText>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Remove"
+                                                       Size="Size.Small"
+                                                       OnClick="() => RemoveFromCart(entry.Key)" />
+                                    </MudStack>
+                                </MudStack>
+                            }
+                        }
+                        <MudDivider Class="my-2" />
+                        <MudText Typo="Typo.subtitle1">
+                            <strong>Total: €@CartTotal.ToString("0.00")</strong>
+                        </MudText>
+                        <MudButton OnClick="PlaceOrder" Disabled="_ordering"
+                                   Variant="Variant.Filled" Color="Color.Primary"
+                                   FullWidth="true" Class="mt-3">
+                            @(_ordering ? "Placing order…" : "Place Order")
+                        </MudButton>
+                    }
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    }
+</MudContainer>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private RestaurantResponse? _restaurant;
+    private bool _loading = true;
+    private bool _ordering;
+    private readonly Dictionary<Guid, int> _cart = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _restaurant = await RestaurantApi.GetRestaurantAsync(Id);
+        if (_restaurant is null)
+            Snackbar.Add("Restaurant not found.", Severity.Error);
+        _loading = false;
+    }
+
+    private void AddToCart(MenuItemResponse item)
+    {
+        _cart[item.Id] = _cart.GetValueOrDefault(item.Id, 0) + 1;
+    }
+
+    private void RemoveFromCart(Guid itemId)
+    {
+        if (_cart.TryGetValue(itemId, out var qty) && qty > 1)
+            _cart[itemId] = qty - 1;
+        else
+            _cart.Remove(itemId);
+    }
+
+    private MenuItemResponse? GetCartItem(Guid itemId) =>
+        _restaurant?.MenuItems.FirstOrDefault(m => m.Id == itemId);
+
+    private decimal CartTotal => _restaurant is null ? 0 :
+        _cart.Sum(e => (_restaurant.MenuItems.FirstOrDefault(m => m.Id == e.Key)?.Price ?? 0) * e.Value);
+
+    private async Task PlaceOrder()
+    {
+        if (_cart.Count == 0) return;
+        _ordering = true;
+        var items = _cart.Select(e => new OrderItemRequest(e.Key, e.Value)).ToList();
+        var order = await OrderApi.CreateOrderAsync(new CreateOrderRequest(Id, items));
+        _ordering = false;
+        if (order is null)
+        {
+            Snackbar.Add("Failed to place order.", Severity.Error);
+            return;
+        }
+        Nav.NavigateTo($"/customer/orders/{order.Id}");
+    }
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "Open" => Color.Success,
+        "Closed" => Color.Error,
+        _ => Color.Default
+    };
+}

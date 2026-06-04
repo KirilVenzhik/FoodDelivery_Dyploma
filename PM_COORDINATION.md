@@ -39,7 +39,11 @@ adds only the methods its pages need; if two need the same client, Phase 1 stubs
 
 ## Pending registrations / notes for Phase 3
 (append here as parallel sessions discover needs)
--
+- **Session 2a (Customer):** Add after `AddScoped<IAuthService, AuthService>()` in Program.cs:
+  `builder.Services.AddScoped<RestaurantApiClient>();`
+  `builder.Services.AddScoped<OrderApiClient>();`
+  `builder.Services.AddScoped<NotificationApiClient>();`
+- **Session 2c (Courier):** `builder.Services.AddScoped<DeliveryApiClient>();`
 
 ## Session log
 - 2026-06-04 — PM analysis complete. Backend verified complete (6 services, 47 tests). Frontend not started.
