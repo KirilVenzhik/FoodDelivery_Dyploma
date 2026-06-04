@@ -27,7 +27,7 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponse?> RegisterAsync(string email, string password, string role)
     {
-        var resp = await _http.PostAsJsonAsync("/api/auth/register", new RegisterRequest(email, password, role));
+        var resp = await _http.PostAsJsonAsync("/api/auth/register", new RegisterRequest(email, password, RoleCodes.ToInt(role)));
         if (!resp.IsSuccessStatusCode) return null;
         var auth = await resp.Content.ReadFromJsonAsync<AuthResponse>();
         if (auth is not null)
