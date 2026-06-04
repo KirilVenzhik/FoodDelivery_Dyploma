@@ -1,0 +1,110 @@
+@page "/courier/deliveries/{Id:guid}"
+@attribute [Authorize(Roles = "Courier")]
+@inject DeliveryApiClient Delivery
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-6">
+    <MudButton StartIcon="@Icons.Material.Filled.ArrowBack" Variant="Variant.Text"
+               OnClick="@(() => Nav.NavigateTo("/courier/deliveries"))" Class="mb-4">
+        Back
+    </MudButton>
+
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else if (_item is null)
+    {
+        <MudAlert Severity="Severity.Error">Delivery not found.</MudAlert>
+    }
+    else
+    {
+        <MudPaper Class="pa-6" Elevation="2">
+            <MudText Typo="Typo.h6" GutterBottom="true">Delivery Detail</MudText>
+
+            <MudSimpleTable Dense="true" Bordered="false" Striped="true">
+                <tbody>
+                    <tr><td>Delivery ID</td><td>@_item.Id</td></tr>
+                    <tr><td>Order ID</td><td>@_item.OrderId</td></tr>
+                    <tr><td>Status</td>
+                        <td><MudChip T="string" Color="@StatusColor(_item.Status)" Size="Size.Small">@_item.Status</MudChip></td>
+                    </tr>
+                    <tr><td>Created</td><td>@_item.CreatedAt.ToLocalTime().ToString("g")</td></tr>
+                    <tr><td>Updated</td><td>@_item.UpdatedAt.ToLocalTime().ToString("g")</td></tr>
+                </tbody>
+            </MudSimpleTable>
+
+            <MudStack Row="true" Class="mt-6" Spacing="2">
+                @if (_item.Status == "Assigned")
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Info"
+                               OnClick="PickupAsync" Disabled="_busy">
+                        Pick Up
+                    </MudButton>
+                }
+                else if (_item.Status == "InProgress")
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Success"
+                               OnClick="CompleteAsync" Disabled="_busy">
+                        Complete Delivery
+                    </MudButton>
+                }
+            </MudStack>
+        </MudPaper>
+    }
+</MudContainer>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private DeliveryResponse? _item;
+    private bool _loading = true;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _item = await Delivery.GetByIdAsync(Id);
+        _loading = false;
+    }
+
+    private async Task PickupAsync()
+    {
+        _busy = true;
+        var result = await Delivery.PickupAsync(Id);
+        if (result is not null)
+        {
+            _item = result;
+            Snackbar.Add("Delivery picked up!", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add("Failed to pick up.", Severity.Error);
+        }
+        _busy = false;
+    }
+
+    private async Task CompleteAsync()
+    {
+        _busy = true;
+        var result = await Delivery.CompleteAsync(Id);
+        if (result is not null)
+        {
+            _item = result;
+            Snackbar.Add("Delivery completed!", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add("Failed to complete.", Severity.Error);
+        }
+        _busy = false;
+    }
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "Assigned"   => Color.Warning,
+        "InProgress" => Color.Info,
+        "Delivered"  => Color.Success,
+        _            => Color.Default
+    };
+}
