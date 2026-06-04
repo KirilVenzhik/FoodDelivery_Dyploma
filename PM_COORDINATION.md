@@ -39,7 +39,7 @@ adds only the methods its pages need; if two need the same client, Phase 1 stubs
 
 ## Pending registrations / notes for Phase 3
 (append here as parallel sessions discover needs)
--
+- **[2c Courier]** `builder.Services.AddScoped<DeliveryApiClient>();` — inject into Pages/Courier pages
 
 ## Session log
 - 2026-06-04 — PM analysis complete. Backend verified complete (6 services, 47 tests). Frontend not started.
@@ -56,3 +56,16 @@ Foundation provides for the role sessions: all Models, CustomAuthStateProvider, 
 (Bearer + 401 refresh-retry), IAuthService/AuthService, RoleRoutes, auth pages, empty role nav.
 Role sessions 2a/2b/2c subclass `ApiClient`, add only their Pages/<Role>/** and their API client,
 and log any Program.cs service registration under "Pending registrations" for Phase 3.
+
+## Backend gotcha (verified 2026-06-04) — for all frontend sessions
+AuthService uses `AddControllers()` with NO JsonStringEnumConverter. Therefore any enum sent
+to the backend must be the NUMERIC value, not the name. `UserRole`: 1=Customer, 2=RestaurantOwner,
+3=Courier, 4=Admin. Fix applied: register sends `role` as int (RoleCodes.ToInt). Responses still
+return Role as a string name (user.Role.ToString()), and the JWT role claim = the name string,
+so [Authorize(Roles="Customer")] / AuthorizeView Roles="..." work with the name. If other services
+expect enums in request bodies, send numbers too (or confirm a string-enum converter exists there).
+
+## Milestone (2026-06-04)
+Foundation (Phases 0-1) built green and MERGED to master. Register/login verified working
+(register sends numeric role; CRLF/sync truncation on 3 files fixed by rewrite). 
+NEXT: launch role sessions 2a/2b/2c in parallel, then integration (Phase 3).
