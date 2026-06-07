@@ -2,15 +2,16 @@
 @inject NavigationManager Nav
 @inject IAuthService Auth
 
-<MudThemeProvider />
+<MudThemeProvider Theme="_theme" />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
 
 <MudLayout>
-    <MudAppBar Elevation="1">
+    <MudAppBar Elevation="1" Color="Color.Primary">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
                        OnClick="@(() => _drawerOpen = !_drawerOpen)" />
+        <MudIcon Icon="@Icons.Material.Filled.Fastfood" Class="mr-2" />
         <MudText Typo="Typo.h6">FoodDelivery</MudText>
         <MudSpacer />
         <AuthorizeView>
@@ -20,29 +21,64 @@
             </Authorized>
             <NotAuthorized>
                 <MudButton Href="/login" Color="Color.Inherit">Login</MudButton>
-                <MudButton Href="/register" Color="Color.Inherit">Register</MudButton>
+                <MudButton Href="/register" Variant="Variant.Outlined" Color="Color.Inherit" Class="ml-2">Register</MudButton>
             </NotAuthorized>
         </AuthorizeView>
     </MudAppBar>
 
-    <MudDrawer @bind-Open="_drawerOpen" Elevation="1" ClipMode="DrawerClipMode.Always">
+    <MudDrawer @bind-Open="_drawerOpen" Elevation="1" ClipMode="DrawerClipMode.Always" Variant="DrawerVariant.Responsive">
+        <MudDrawerHeader>
+            <MudText Typo="Typo.subtitle1" Class="mud-text-secondary">Menu</MudText>
+        </MudDrawerHeader>
         <MudNavMenu>
-            <!-- Phase 3: role-scoped nav links injected here.
-                 <AuthorizeView Roles="Customer"> ... </AuthorizeView>
-                 <AuthorizeView Roles="RestaurantOwner"> ... </AuthorizeView>
-                 <AuthorizeView Roles="Courier"> ... </AuthorizeView> -->
+            <AuthorizeView Roles="Customer" Context="c">
+                <MudNavLink Href="/customer/restaurants" Icon="@Icons.Material.Filled.Storefront">Restaurants</MudNavLink>
+                <MudNavLink Href="/customer/orders" Icon="@Icons.Material.Filled.ReceiptLong">My Orders</MudNavLink>
+                <MudNavLink Href="/customer/notifications" Icon="@Icons.Material.Filled.Notifications">Notifications</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Roles="RestaurantOwner" Context="o">
+                <MudNavLink Href="/owner/restaurants" Icon="@Icons.Material.Filled.Restaurant">My Restaurants</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Roles="Courier" Context="d">
+                <MudNavLink Href="/courier/pending" Icon="@Icons.Material.Filled.LocalShipping">Pending</MudNavLink>
+                <MudNavLink Href="/courier/deliveries" Icon="@Icons.Material.Filled.DeliveryDining">My Deliveries</MudNavLink>
+            </AuthorizeView>
+            <MudDivider Class="my-2" />
+            <MudNavLink Href="/account" Icon="@Icons.Material.Filled.Person">Account</MudNavLink>
         </MudNavMenu>
     </MudDrawer>
 
     <MudMainContent>
-        <MudContainer MaxWidth="MaxWidth.Large" Class="my-6">
-            @Body
-        </MudContainer>
+        @Body
     </MudMainContent>
 </MudLayout>
 
 @code {
     private bool _drawerOpen = true;
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight()
+        {
+            Primary = "#E8590C",
+            Secondary = "#2F9E44",
+            AppbarBackground = "#E8590C",
+            AppbarText = "#FFFFFF",
+            Background = "#FFF8F2",
+            Surface = "#FFFFFF",
+            DrawerBackground = "#FFFFFF",
+            DrawerText = "#37474F",
+            Success = "#2F9E44",
+            Error = "#E03131",
+            Warning = "#F08C00",
+            Info = "#1971C2",
+            TextPrimary = "#2B2B2B"
+        },
+        LayoutProperties = new LayoutProperties()
+        {
+            DefaultBorderRadius = "10px"
+        }
+    };
 
     private async Task Logout()
     {

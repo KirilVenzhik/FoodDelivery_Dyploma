@@ -1,6 +1,7 @@
 @page "/owner/restaurants/{Id:guid}"
 @attribute [Authorize(Roles = "RestaurantOwner")]
 @inject RestaurantApiClient RestaurantApi
+@inject OrderApiClient OrderApi
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
@@ -89,6 +90,61 @@
                 <MudText Typo="Typo.body2" Class="pa-4">No menu items yet. Add your first item!</MudText>
             </NoRecordsContent>
         </MudTable>
+
+        <MudText Typo="Typo.h6" Class="mt-6 mb-3">Incoming Orders</MudText>
+
+        @if (_ordersLoading)
+        {
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+        }
+        else if (_orders is null || _orders.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">No orders yet.</MudAlert>
+        }
+        else
+        {
+            <MudTable T="OrderResponse" Items="@_orders" Hover="true" Dense="true" Striped="true">
+                <HeaderContent>
+                    <MudTh>Order ID</MudTh>
+                    <MudTh>Date</MudTh>
+                    <MudTh>Items</MudTh>
+                    <MudTh>Total</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Order ID">@context.Id.ToString()[..8]…</MudTd>
+                    <MudTd DataLabel="Date">@context.CreatedAtUtc.ToLocalTime().ToString("g")</MudTd>
+                    <MudTd DataLabel="Items">@context.Items.Count</MudTd>
+                    <MudTd DataLabel="Total">€@context.TotalAmount.ToString("0.00")</MudTd>
+                    <MudTd DataLabel="Status">
+                        <MudChip T="string" Color="@OrderStatusColor(context.Status)" Size="Size.Small">
+                            @context.Status
+                        </MudChip>
+                    </MudTd>
+                    <MudTd>
+                        @if (context.Status == "Paid")
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Info" Class="mr-1"
+                                       OnClick="@(() => OrderAction(context.Id, "InPreparation"))" Disabled="_busy">
+                                Accept
+                            </MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error"
+                                       OnClick="@(() => OrderAction(context.Id, "Cancelled"))" Disabled="_busy">
+                                Reject
+                            </MudButton>
+                        }
+                        else if (context.Status == "InPreparation")
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                       OnClick="@(() => OrderAction(context.Id, "ReadyForDelivery"))" Disabled="_busy">
+                                Ready for Delivery
+                            </MudButton>
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
     }
 </MudContainer>
 
@@ -96,7 +152,9 @@
     [Parameter] public Guid Id { get; set; }
 
     private RestaurantResponse? _restaurant;
+    private List<OrderResponse>? _orders;
     private bool _loading = true;
+    private bool _ordersLoading;
     private bool _busy;
     private string _editName = "";
     private string _editDescription = "";
@@ -119,7 +177,41 @@
             Snackbar.Add("Restaurant not found.", Severity.Error);
         }
         _loading = false;
+        await LoadOrdersAsync();
     }
+
+    private async Task LoadOrdersAsync()
+    {
+        _ordersLoading = true;
+        _orders = await OrderApi.GetOrdersByRestaurantAsync(Id);
+        _ordersLoading = false;
+    }
+
+    private async Task OrderAction(Guid orderId, string newStatus)
+    {
+        _busy = true;
+        var updated = await OrderApi.ChangeStatusAsync(orderId, newStatus);
+        _busy = false;
+        if (updated is not null)
+        {
+            await LoadOrdersAsync();
+            Snackbar.Add($"Order status updated to {newStatus}.", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add("Failed to update order status.", Severity.Error);
+        }
+    }
+
+    private static Color OrderStatusColor(string status) => status switch
+    {
+        "Paid" => Color.Warning,
+        "InPreparation" => Color.Info,
+        "ReadyForDelivery" or "InDelivery" => Color.Primary,
+        "Delivered" => Color.Success,
+        "Cancelled" or "PaymentFailed" or "Failed" => Color.Error,
+        _ => Color.Default
+    };
 
     private async Task SaveChanges()
     {
@@ -163,7 +255,7 @@
             var added = await RestaurantApi.AddMenuItemAsync(Id, req);
             if (added is not null)
             {
-                _restaurant!.MenuItems.Add(added);
+                await RefreshMenuAsync();
                 Snackbar.Add("Menu item added.", Severity.Success);
             }
             else
@@ -183,8 +275,7 @@
             var updated = await RestaurantApi.UpdateMenuItemAsync(Id, item.Id, req);
             if (updated is not null)
             {
-                var idx = _restaurant!.MenuItems.FindIndex(m => m.Id == item.Id);
-                if (idx >= 0) _restaurant.MenuItems[idx] = updated;
+                await RefreshMenuAsync();
                 Snackbar.Add("Menu item updated.", Severity.Success);
             }
             else
@@ -205,12 +296,18 @@
         var ok = await RestaurantApi.DeleteMenuItemAsync(Id, item.Id);
         if (ok)
         {
-            _restaurant!.MenuItems.Remove(item);
+            await RefreshMenuAsync();
             Snackbar.Add("Menu item deleted.", Severity.Success);
         }
         else
         {
             Snackbar.Add("Failed to delete menu item.", Severity.Error);
         }
+    }
+
+    private async Task RefreshMenuAsync()
+    {
+        var fresh = await RestaurantApi.GetRestaurantAsync(Id);
+        if (fresh is not null) _restaurant = fresh;
     }
 }

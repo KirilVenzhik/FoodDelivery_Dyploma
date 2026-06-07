@@ -16,6 +16,7 @@ public class OrdersController : ControllerBase
     private readonly ChangeOrderStatusCommandHandler _changeStatusHandler;
     private readonly GetOrderByIdQueryHandler _getByIdHandler;
     private readonly GetOrdersByClientQueryHandler _getByClientHandler;
+    private readonly GetOrdersByRestaurantQueryHandler _getByRestaurantHandler;
     private readonly ICurrentUser _currentUser;
 
     public OrdersController(
@@ -23,12 +24,14 @@ public class OrdersController : ControllerBase
         ChangeOrderStatusCommandHandler changeStatusHandler,
         GetOrderByIdQueryHandler getByIdHandler,
         GetOrdersByClientQueryHandler getByClientHandler,
+        GetOrdersByRestaurantQueryHandler getByRestaurantHandler,
         ICurrentUser currentUser)
     {
         _placeOrderHandler = placeOrderHandler;
         _changeStatusHandler = changeStatusHandler;
         _getByIdHandler = getByIdHandler;
         _getByClientHandler = getByClientHandler;
+        _getByRestaurantHandler = getByRestaurantHandler;
         _currentUser = currentUser;
     }
 
@@ -65,6 +68,12 @@ public class OrdersController : ControllerBase
 
         return Ok(orders);
     }
+
+    [HttpGet("restaurant/{restaurantId:guid}")]
+    [Authorize(Roles = "RestaurantOwner")]
+    public async Task<IActionResult> GetByRestaurant(Guid restaurantId, CancellationToken ct)
+        => Ok(await _getByRestaurantHandler.HandleAsync(
+               new GetOrdersByRestaurantQuery(restaurantId, _currentUser.UserId), ct));
 
     [HttpPatch("{id:guid}/status")]
     [Authorize(Roles = "RestaurantOwner")]

@@ -27,6 +27,13 @@ public class OrderRepository : IOrderRepository
             .OrderByDescending(o => o.CreatedAtUtc)
             .ToListAsync(cancellationToken);
 
+    public async Task<List<Order>> GetByRestaurantIdAsync(Guid restaurantId, CancellationToken ct = default)
+        => await _dbContext.Orders
+            .Include(o => o.Items)
+            .Where(o => o.RestaurantId == restaurantId)
+            .OrderByDescending(o => o.CreatedAtUtc)
+            .ToListAsync(ct);
+
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
         => await _dbContext.SaveChangesAsync(cancellationToken);
 }

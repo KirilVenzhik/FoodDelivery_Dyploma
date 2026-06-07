@@ -10,5 +10,7 @@ public interface IOrderRepository
 
     Task<List<Order>> GetByClientIdAsync(Guid clientId, CancellationToken cancellationToken = default);
 
+    Task<List<Order>> GetByRestaurantIdAsync(Guid restaurantId, CancellationToken ct = default);
+
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }
