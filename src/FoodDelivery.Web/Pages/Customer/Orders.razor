@@ -25,7 +25,7 @@
                 <MudTh></MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd>@context.CreatedAt.ToLocalTime().ToString("g")</MudTd>
+                <MudTd>@context.CreatedAtUtc.ToLocalTime().ToString("g")</MudTd>
                 <MudTd>@context.Id.ToString("D")[..8]…</MudTd>
                 <MudTd>€@context.TotalAmount.ToString("0.00")</MudTd>
                 <MudTd>

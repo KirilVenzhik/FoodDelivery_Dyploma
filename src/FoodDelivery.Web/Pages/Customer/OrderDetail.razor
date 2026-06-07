@@ -39,7 +39,7 @@
             <strong>Total: €@_order.TotalAmount.ToString("0.00")</strong>
         </MudText>
         <MudText Typo="Typo.caption">
-            Placed: @_order.CreatedAt.ToLocalTime().ToString("g") · Auto-refreshing every 5 s
+            Placed: @_order.CreatedAtUtc.ToLocalTime().ToString("g") · Auto-refreshing every 5 s
         </MudText>
     }
 </MudContainer>

@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<ChangeOrderStatusCommandHandler>();
         services.AddScoped<GetOrderByIdQueryHandler>();
         services.AddScoped<GetOrdersByClientQueryHandler>();
+        services.AddScoped<GetOrdersByRestaurantQueryHandler>();
 
         services.AddHostedService<OutboxPublisherWorker>();
         services.AddHostedService<PaymentCompletedConsumer>();

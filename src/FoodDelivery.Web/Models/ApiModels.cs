@@ -4,7 +4,7 @@ namespace FoodDelivery.Web.Models;
 public record AuthResponse(string AccessToken, string RefreshToken, Guid UserId, string Role);
 public record UserDto(Guid UserId, string Email, string Role);
 public record LoginRequest(string Email, string Password);
-public record RegisterRequest(string Email, string Password, string Role);
+public record RegisterRequest(string Email, string Password, int Role); // backend UserRole enum: 1=Customer,2=RestaurantOwner,3=Courier,4=Admin
 public record RefreshRequest(string RefreshToken);
 
 // ---- Restaurant ----
@@ -13,7 +13,7 @@ public record RestaurantResponse(Guid Id, string Name, string Description, strin
 public record MenuItemResponse(Guid Id, string Name, string Description, decimal Price, bool Available);
 
 // ---- Order ----
-public record OrderResponse(Guid Id, Guid RestaurantId, decimal TotalAmount, string Status, DateTime CreatedAt, List<OrderItemResponse> Items);
+public record OrderResponse(Guid Id, Guid RestaurantId, decimal TotalAmount, string Status, DateTime CreatedAtUtc, List<OrderItemResponse> Items);
 public record OrderItemResponse(Guid Id, Guid MenuItemId, string ItemName, decimal UnitPrice, int Quantity, decimal LineTotal);
 
 // ---- Delivery ----

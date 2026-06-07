@@ -74,3 +74,13 @@ expect enums in request bodies, send numbers too (or confirm a string-enum conve
 Foundation (Phases 0-1) built green and MERGED to master. Register/login verified working
 (register sends numeric role; CRLF/sync truncation on 3 files fixed by rewrite). 
 NEXT: launch role sessions 2a/2b/2c in parallel, then integration (Phase 3).
+
+## Session (2026-06-07) — branch: feat/owner-orders
+Implemented owner orders feature. Backend (OrderService): extended AllowedTransitions to allow
+Paid→Cancelled; added OwnerId to RestaurantDto; added GetByRestaurantIdAsync to IOrderRepository +
+OrderRepository; new GetOrdersByRestaurantQuery + handler (ownership-verified, 403 on mismatch, 404
+on unknown restaurant); new GET /api/orders/restaurant/{restaurantId} [RestaurantOwner] endpoint;
+handler registered in DI. Frontend: added GetOrdersByRestaurantAsync to OrderApiClient; RestaurantDetail.razor
+now shows Incoming Orders section with Accept/Reject/Ready-for-Delivery actions and snackbars; deleted
+Owner/Orders.razor; removed "Orders" nav link from MainLayout; fixed OrderResponse.CreatedAt→CreatedAtUtc
+to match backend JSON. Build: 0 errors, 0 warnings. Tests: 47/47 passed.

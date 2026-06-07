@@ -9,7 +9,7 @@ public class Order : Entity
 {
     private static readonly Dictionary<OrderStatus, HashSet<OrderStatus>> AllowedTransitions = new()
     {
-        [OrderStatus.Paid]             = [OrderStatus.InPreparation],
+        [OrderStatus.Paid]             = [OrderStatus.InPreparation, OrderStatus.Cancelled],
         [OrderStatus.InPreparation]    = [OrderStatus.ReadyForDelivery],
         [OrderStatus.ReadyForDelivery] = [OrderStatus.InDelivery],
         [OrderStatus.InDelivery]       = [OrderStatus.Delivered],

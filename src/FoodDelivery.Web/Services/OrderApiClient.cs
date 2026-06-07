@@ -19,4 +19,7 @@ public class OrderApiClient : ApiClient
 
     public Task<OrderResponse?> ChangeStatusAsync(Guid id, string newStatus) =>
         PatchAsync<OrderResponse>($"/api/orders/{id}/status", new ChangeOrderStatusRequest(newStatus));
+
+    public Task<List<OrderResponse>?> GetOrdersByRestaurantAsync(Guid restaurantId) =>
+        GetAsync<List<OrderResponse>>($"/api/orders/restaurant/{restaurantId}");
 }
