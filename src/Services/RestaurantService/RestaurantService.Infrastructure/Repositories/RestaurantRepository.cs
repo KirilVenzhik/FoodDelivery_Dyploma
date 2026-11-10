@@ -17,6 +17,13 @@ public class RestaurantRepository : IRestaurantRepository
         await _dbContext.Restaurants.AddAsync(restaurant, cancellationToken);
     }
 
+    public async Task AddMenuItemAsync(MenuItem menuItem, CancellationToken cancellationToken = default)
+    {
+        // Mark the new item as Added explicitly so EF performs an INSERT (not an UPDATE)
+        // even though it is also referenced by the tracked restaurant aggregate.
+        await _dbContext.MenuItems.AddAsync(menuItem, cancellationToken);
+    }
+
     public async Task<Restaurant?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         return await _dbContext.Restaurants

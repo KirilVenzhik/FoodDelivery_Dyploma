@@ -11,7 +11,9 @@ public class MenuItemConfiguration : IEntityTypeConfiguration<MenuItem>
         builder.ToTable("menu_items");
 
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).HasColumnName("id");
+        // Id is assigned by the domain (MenuItem.Create). Tell EF it is app-generated so a new
+        // item added to a tracked restaurant's collection is INSERTed, not mistaken for an UPDATE.
+        builder.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
         builder.Property(x => x.RestaurantId).HasColumnName("restaurant_id");
         builder.Property(x => x.Name).HasColumnName("name").HasMaxLength(100).IsRequired();
         builder.Property(x => x.Description).HasColumnName("description").HasMaxLength(500).IsRequired();

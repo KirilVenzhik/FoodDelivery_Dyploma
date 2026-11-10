@@ -5,11 +5,14 @@ using FluentValidation.AspNetCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Observability.Extensions;
+using Observability.Logging;
 using RestaurantService.API.Middlewares;
 using RestaurantService.Application.Validators;
 using RestaurantService.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.ConfigureLogging(builder.Configuration);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

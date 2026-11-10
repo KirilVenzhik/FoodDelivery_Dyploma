@@ -38,6 +38,7 @@ public sealed class AddMenuItemCommandHandler
             throw new RestaurantOwnershipException(command.RestaurantId, command.RequestingOwnerId);
 
         var menuItem = restaurant.AddMenuItem(command.Name, command.Description, command.Price);
+        await _repository.AddMenuItemAsync(menuItem, ct);
         await _repository.SaveChangesAsync(ct);
 
         return MenuItemResponse.FromDomain(menuItem);

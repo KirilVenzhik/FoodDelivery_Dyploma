@@ -11,7 +11,7 @@ public class RestaurantConfiguration : IEntityTypeConfiguration<Restaurant>
         builder.ToTable("restaurants");
 
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).HasColumnName("id");
+        builder.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
         builder.Property(x => x.OwnerId).HasColumnName("owner_id");
         builder.Property(x => x.Name).HasColumnName("name").HasMaxLength(100).IsRequired();
         builder.Property(x => x.Description).HasColumnName("description").HasMaxLength(500).IsRequired();
