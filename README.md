@@ -1,6 +1,6 @@
 # FoodDelivery
 
-[![CI](https://github.com/KirilVenzhik/food-delivery-dyploma/actions/workflows/ci.yml/badge.svg)](https://github.com/KirilVenzhik/food-delivery-dyploma/actions/workflows/ci.yml)
+[![CI](https://github.com/KirilVenzhik/FoodDelivery_Dyploma/actions/workflows/ci.yml/badge.svg)](https://github.com/KirilVenzhik/FoodDelivery_Dyploma/actions/workflows/ci.yml)
 
 A food delivery backend built as .NET 9 microservices: an API gateway, six services, RabbitMQ events and one PostgreSQL database per service.
 
