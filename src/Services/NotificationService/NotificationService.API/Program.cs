@@ -6,12 +6,11 @@ using NotificationService.API.Middlewares;
 using NotificationService.Infrastructure.Extensions;
 using NotificationService.Infrastructure.Persistence;
 using Observability.Extensions;
-using Serilog;
+using Observability.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Host.UseSerilog((ctx, cfg) =>
-    cfg.ReadFrom.Configuration(ctx.Configuration).Enrich.FromLogContext());
+builder.Host.ConfigureLogging(builder.Configuration);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

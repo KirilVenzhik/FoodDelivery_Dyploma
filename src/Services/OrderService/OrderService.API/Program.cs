@@ -5,12 +5,15 @@ using FluentValidation.AspNetCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Observability.Extensions;
+using Observability.Logging;
 using OrderService.API.Middlewares;
 using OrderService.Application.Validators;
 using OrderService.Infrastructure.Extensions;
 using OrderService.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.ConfigureLogging(builder.Configuration);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
