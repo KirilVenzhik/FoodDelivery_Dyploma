@@ -93,6 +93,7 @@ Each service has API / Application / Domain / Infrastructure layers. Migrations 
 - **CQRS without MediatR** - `Commands/` and `Queries/` hold explicit handlers (18 command, 13 query) injected into controllers; easy to follow and debug, with no hidden pipeline.
 - **JWT checked at the gateway and in every service** - the gateway rejects bad tokens early, and services still enforce roles (`Customer`, `RestaurantOwner`, `Courier`) if called directly.
 - **Correlation id across HTTP and events** - `X-Correlation-Id` middleware and an event field let you follow one order through all services in Seq.
+- **Object-level authorization** - handlers check that the current user owns the order, restaurant, payment, delivery or notification, not only the role.
 
 Messaging: a custom EventBus on RabbitMQ.Client 6.8.1 with one durable topic exchange `food-delivery.events` and a durable queue per consumer (`<service>.<event>`), manual ack, prefetch 1.
 
@@ -139,7 +140,7 @@ curl http://localhost:5000/api/auth/me -H "Authorization: Bearer <accessToken>"
 dotnet test FoodDelivery.sln
 ```
 
-54 unit tests cover the Auth, Order, Payment and Restaurant services. CI runs the same build and tests on every push.
+63 unit tests cover the Auth, Order, Payment and Restaurant services. CI runs the same build and tests on every push.
 
 ## Project structure
 
@@ -156,13 +157,12 @@ docker-compose.yml   full stack: services, PostgreSQL x6, RabbitMQ, Seq
 
 These are known gaps. I would fix them next:
 
-- **Missing ownership check** - changing an order status is limited to the `RestaurantOwner` role, but the handler does not check that the owner owns the order's restaurant.
 - **Payment is simulated** - it always succeeds. The `PaymentFailed` consumer and domain logic exist in Order, but nothing publishes `PaymentFailed` yet.
 - **Outbox only in Order** - Payment and Delivery publish right after saving, so a crash between the two steps can lose an event (dual-write risk).
 - **No retry policy** - consumers requeue a message that fails processing, with no retry limit and no dead-letter queue.
 - **New RabbitMQ connection per publish** - a shared connection or channel pool would be cheaper.
 - **One shared symmetric JWT key** - asymmetric keys or an identity provider would be safer.
-- **Tests** - unit tests only: no integration tests, and none for Delivery and Notification.
+- **Tests** - unit tests only: no integration tests, and none for Delivery and Notification (their ownership checks are not covered by tests).
 - **Configuration** - Swagger is enabled in all environments, and the Seq URL is hard-coded for the Docker network.
 
 ## About this project
