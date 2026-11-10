@@ -27,7 +27,7 @@ public class PaymentsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var response = await _queryHandler.HandleAsync(
-            new GetPaymentByOrderIdQuery(orderId, _currentUser.UserId, _currentUser.Role),
+            new GetPaymentByOrderIdQuery(orderId, _currentUser.UserId),
             cancellationToken);
 
         return Ok(response);

@@ -4,10 +4,7 @@ using PaymentService.Domain.Exceptions;
 
 namespace PaymentService.Application.Queries;
 
-public record GetPaymentByOrderIdQuery(
-    Guid OrderId,
-    Guid RequestingClientId,
-    string RequestingRole);
+public record GetPaymentByOrderIdQuery(Guid OrderId, Guid RequestingClientId);
 
 public sealed class GetPaymentByOrderIdQueryHandler
 {
@@ -24,7 +21,7 @@ public sealed class GetPaymentByOrderIdQueryHandler
         if (payment is null)
             throw new PaymentNotFoundException(query.OrderId);
 
-        if (query.RequestingRole == "Customer" && payment.ClientId != query.RequestingClientId)
+        if (payment.ClientId != query.RequestingClientId)
             throw new UnauthorizedAccessException(
                 "You are not authorized to view this payment.");
 
