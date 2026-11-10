@@ -52,7 +52,7 @@ public class OrdersController : ControllerBase
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
         var response = await _getByIdHandler.HandleAsync(
-            new GetOrderByIdQuery(id, _currentUser.UserId, _currentUser.Role ?? string.Empty),
+            new GetOrderByIdQuery(id, _currentUser.UserId),
             cancellationToken);
 
         return Ok(response);
@@ -83,7 +83,7 @@ public class OrdersController : ControllerBase
         CancellationToken cancellationToken)
     {
         var response = await _changeStatusHandler.HandleAsync(
-            new ChangeOrderStatusCommand(id, request.Status),
+            new ChangeOrderStatusCommand(id, request.Status, _currentUser.UserId),
             cancellationToken);
 
         return Ok(response);
