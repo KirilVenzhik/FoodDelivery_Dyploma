@@ -140,7 +140,7 @@ curl http://localhost:5000/api/auth/me -H "Authorization: Bearer <accessToken>"
 dotnet test FoodDelivery.sln
 ```
 
-63 unit tests cover the Auth, Order, Payment and Restaurant services. CI runs the same build and tests on every push.
+64 unit tests cover the Auth, Order, Payment and Restaurant services. CI runs the same build and tests on every push.
 
 ## Project structure
 
