@@ -29,6 +29,7 @@ builder.Services
 builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthServices();
 builder.Services.AddCorrelation();
+builder.Services.AddHealthChecks();
 
 builder.Services.AddAuthorization(options =>
 {
@@ -41,5 +42,6 @@ app.UseCorrelation();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapReverseProxy();
+app.MapHealthChecks("/health");
 
 app.Run();

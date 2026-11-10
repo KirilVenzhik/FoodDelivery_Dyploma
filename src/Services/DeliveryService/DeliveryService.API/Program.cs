@@ -49,6 +49,8 @@ builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthServices();
 builder.Services.AddCorrelation();
 
+builder.Services.AddHealthChecks().AddDbContextCheck<DeliveryDbContext>();
+
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
@@ -66,5 +68,6 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHealthChecks("/health");
 
 app.Run();
