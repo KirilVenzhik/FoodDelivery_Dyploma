@@ -4,3 +4,15 @@ obj/
 .idea/
 *.user
 *.suo
+# Local working notes and tooling
+.claude/
+CLAUDE*.md
+CLAUDE_CODE_PROMPT_*.md
+*_BRIEF.md
+CONTEXT.md
+SESSION_BRIEFS.md
+PM_COORDINATION.md
+FRONTEND_INSTRUCTIONS.md
+*.docx
+*.user
+*.slnLaunch.user
