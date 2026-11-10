@@ -64,6 +64,7 @@ public sealed class PlaceOrderCommandHandler
                 CorrelationId = order.CorrelationId,
                 OrderId = order.Id,
                 ClientId = order.ClientId,
+                RestaurantId = order.RestaurantId,
                 Amount = order.TotalAmount
             },
             "payment.requested",

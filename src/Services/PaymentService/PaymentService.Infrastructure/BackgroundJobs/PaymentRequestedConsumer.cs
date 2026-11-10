@@ -102,6 +102,7 @@ public class PaymentRequestedConsumer : BackgroundService
                     evt.OrderId,
                     evt.CorrelationId,
                     evt.ClientId,
+                    evt.RestaurantId,
                     evt.Amount);
 
                 await handler.HandleAsync(command, stoppingToken);

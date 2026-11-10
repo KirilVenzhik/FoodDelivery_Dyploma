@@ -8,5 +8,7 @@ public class PaymentRequestedEvent : IntegrationEvent
 
     public Guid ClientId { get; init; }
 
+    public Guid RestaurantId { get; init; }
+
     public decimal Amount { get; init; }
 }

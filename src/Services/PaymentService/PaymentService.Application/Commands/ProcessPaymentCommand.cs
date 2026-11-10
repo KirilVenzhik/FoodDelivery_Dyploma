@@ -11,6 +11,7 @@ public record ProcessPaymentCommand(
     Guid OrderId,
     Guid CorrelationId,
     Guid ClientId,
+    Guid RestaurantId,
     decimal Amount);
 
 public sealed class ProcessPaymentCommandHandler
@@ -52,7 +53,9 @@ public sealed class ProcessPaymentCommandHandler
                 OrderId = payment.OrderId,
                 PaymentId = payment.Id,
                 CorrelationId = payment.CorrelationId,
-                Amount = payment.Amount
+                Amount = payment.Amount,
+                ClientId = command.ClientId,
+                RestaurantId = command.RestaurantId
             },
             "payment.completed",
             ct);
