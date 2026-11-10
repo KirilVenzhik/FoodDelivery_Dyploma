@@ -68,14 +68,20 @@ namespace NotificationService.Infrastructure.Migrations
                 nullable: false,
                 defaultValue: "");
 
-            migrationBuilder.AlterColumn<int>(
-                name: "type",
-                table: "notifications",
-                type: "integer",
-                nullable: false,
-                oldClrType: typeof(string),
-                oldType: "character varying(100)",
-                oldMaxLength: 100);
+            // PostgreSQL cannot cast varchar to integer on its own, so the old
+            // enum names are mapped to NotificationType values explicitly.
+            migrationBuilder.Sql(
+                """
+                ALTER TABLE notifications
+                ALTER COLUMN type TYPE integer
+                USING CASE type
+                    WHEN 'OrderPlaced' THEN 0
+                    WHEN 'PaymentSuccess' THEN 1
+                    WHEN 'PaymentFailed' THEN 2
+                    WHEN 'OrderDelivered' THEN 3
+                    ELSE 0
+                END;
+                """);
 
             migrationBuilder.AlterColumn<string>(
                 name: "message",
@@ -131,6 +137,19 @@ namespace NotificationService.Infrastructure.Migrations
                 name: "correlation_id",
                 table: "processed_events",
                 newName: "EventId");
+
+            migrationBuilder.Sql(
+                """
+                ALTER TABLE notifications
+                ALTER COLUMN type TYPE character varying(100)
+                USING CASE type
+                    WHEN 0 THEN 'OrderPlaced'
+                    WHEN 1 THEN 'PaymentSuccess'
+                    WHEN 2 THEN 'PaymentFailed'
+                    WHEN 3 THEN 'OrderDelivered'
+                    ELSE 'OrderPlaced'
+                END;
+                """);
 
             migrationBuilder.RenameColumn(
                 name: "type",
