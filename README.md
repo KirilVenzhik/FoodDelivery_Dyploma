@@ -128,7 +128,9 @@ curl -X POST http://localhost:5000/api/auth/login -H "Content-Type: application/
   -d '{"email":"demo@example.com","password":"secret123"}'
 # copy "accessToken" from the response
 
-curl http://localhost:5000/api/restaurants -H "Authorization: Bearer <accessToken>"
+curl http://localhost:5000/api/restaurants
+
+curl http://localhost:5000/api/auth/me -H "Authorization: Bearer <accessToken>"
 ```
 
 ## Running tests
@@ -137,7 +139,7 @@ curl http://localhost:5000/api/restaurants -H "Authorization: Bearer <accessToke
 dotnet test FoodDelivery.sln
 ```
 
-49 unit tests cover the Auth, Order, Payment and Restaurant services. CI runs the same build and tests on every push.
+54 unit tests cover the Auth, Order, Payment and Restaurant services. CI runs the same build and tests on every push.
 
 ## Project structure
 
@@ -154,7 +156,6 @@ docker-compose.yml   full stack: services, PostgreSQL x6, RabbitMQ, Seq
 
 These are known gaps. I would fix them next:
 
-- **Open registration with any role** - `POST /api/auth/register` accepts any role in the request, including `Admin`. Roles should be assigned by an admin or an onboarding flow.
 - **Missing ownership check** - changing an order status is limited to the `RestaurantOwner` role, but the handler does not check that the owner owns the order's restaurant.
 - **Payment is simulated** - it always succeeds. The `PaymentFailed` consumer and domain logic exist in Order, but nothing publishes `PaymentFailed` yet.
 - **Outbox only in Order** - Payment and Delivery publish right after saving, so a crash between the two steps can lose an event (dual-write risk).
