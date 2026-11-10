@@ -45,7 +45,7 @@ public sealed class PlaceOrderCommandHandler
                 throw new RestaurantValidationException(
                     $"Menu item '{itemRequest.MenuItemId}' does not exist in this restaurant.");
 
-            if (!menuItem.IsAvailable)
+            if (!menuItem.Available)
                 throw new RestaurantValidationException(
                     $"Menu item '{menuItem.Name}' is not currently available.");
 

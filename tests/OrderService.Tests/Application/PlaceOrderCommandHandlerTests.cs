@@ -29,7 +29,7 @@ public class PlaceOrderCommandHandlerTests
             Status = active ? "Open" : "Closed",
             MenuItems =
             [
-                new MenuItemDto { Id = itemId, Name = "Burger", Price = 10m, IsAvailable = itemAvailable }
+                new MenuItemDto { Id = itemId, Name = "Burger", Price = 10m, Available = itemAvailable }
             ]
         };
     }

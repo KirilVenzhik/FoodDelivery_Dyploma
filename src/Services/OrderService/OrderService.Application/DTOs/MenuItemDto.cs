@@ -8,5 +8,5 @@ public sealed class MenuItemDto
 
     public decimal Price { get; set; }
 
-    public bool IsAvailable { get; set; }
+    public bool Available { get; set; }
 }
