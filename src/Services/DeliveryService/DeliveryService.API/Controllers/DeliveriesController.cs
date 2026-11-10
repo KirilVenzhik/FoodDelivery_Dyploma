@@ -58,7 +58,7 @@ public class DeliveriesController : ControllerBase
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
         var result = await _getByIdHandler.HandleAsync(
-            new GetDeliveryByIdQuery(id, _currentUser.UserId, _currentUser.Role), cancellationToken);
+            new GetDeliveryByIdQuery(id, _currentUser.UserId), cancellationToken);
         return Ok(result);
     }
 

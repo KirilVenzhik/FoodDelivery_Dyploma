@@ -4,7 +4,7 @@ using DeliveryService.Domain.Exceptions;
 
 namespace DeliveryService.Application.Queries;
 
-public record GetDeliveryByIdQuery(Guid DeliveryId, Guid RequestingUserId, string RequestingRole);
+public record GetDeliveryByIdQuery(Guid DeliveryId, Guid RequestingUserId);
 
 public sealed class GetDeliveryByIdQueryHandler
 {
@@ -18,10 +18,7 @@ public sealed class GetDeliveryByIdQueryHandler
         var delivery = await _repository.GetByIdAsync(query.DeliveryId, ct)
             ?? throw new DeliveryNotFoundException(query.DeliveryId);
 
-        if (query.RequestingRole == "Customer" && delivery.ClientId != query.RequestingUserId)
-            throw new UnauthorizedAccessException("You are not authorized to view this delivery.");
-
-        if (query.RequestingRole == "Courier" && delivery.CourierId != query.RequestingUserId)
+        if (delivery.ClientId != query.RequestingUserId && delivery.CourierId != query.RequestingUserId)
             throw new UnauthorizedAccessException("You are not authorized to view this delivery.");
 
         return DeliveryResponse.FromDomain(delivery);
