@@ -16,3 +16,7 @@ FRONTEND_INSTRUCTIONS.md
 *.docx
 *.user
 *.slnLaunch.user
+
+# Secrets
+.env
+!.env.example
